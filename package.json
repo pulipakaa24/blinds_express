@@ -1,0 +1,23 @@
+{
+  "name": "blinds_express",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "agenda": "^5.0.0",
+    "argon2": "^0.43.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.16.1",
+    "node-schedule": "^2.1.1",
+    "pg": "^8.16.0",
+    "socket.io": "^4.8.1"
+  }
+}
