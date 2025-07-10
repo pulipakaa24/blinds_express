@@ -64,16 +64,6 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
           socketIoInstance.to(socket).emit("cancel_calib", {periphNum: result.rows[0].peripheral_number});
         }
       }
-
-      const {rows: userRows} = await sharedPgPool.query("select socket from user_tokens where user_id=$1", [userID]);
-
-      if (userRows.length == 1) {
-        if (userRows[0]){
-          const userSocket = userRows[0].socket;
-          socketIoInstance.to(userSocket).emit("cancel_calib", {periphID: result.rows[0].id});
-        }
-      }
-      else console.log("No App connected");
     } catch (error) {
       console.error(`Error processing job:`, error);
       throw error;
