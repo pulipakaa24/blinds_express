@@ -3,12 +3,8 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
     try {
-        const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/myScheduledApp';
-        await mongoose.connect(mongoUri, {
-            // These options are often recommended for newer Mongoose versions, though some might be deprecated in future
-            // useNewUrlParser: true,
-            // useUnifiedTopology: true,
-        });
+        const mongoUri = 'mongodb://localhost:27017/myScheduledApp';
+        await mongoose.connect(mongoUri);
         console.log('MongoDB connected successfully for Mongoose!');
     } catch (err) {
         console.error('MongoDB connection error (Mongoose):', err);
