@@ -9,6 +9,7 @@ const socketIo = require('socket.io');
 const connectDB = require('./db'); // Your Mongoose DB connection
 const { initializeAgenda } = require('./agenda'); // Agenda setup
 const format = require('pg-format');
+const cronParser = require('cron-parser');
 
 const app = express();
 const port = 3000;
@@ -533,4 +534,66 @@ app.post('/delete_peripheral', authenticateToken, async (req, res) => {
 
 server.listen(port, () => {
   console.log(`Example app listening at http://localhost:${port}`);
+});
+
+app.post('/periph_schedule_list', authenticateToken, async (req, res) => {
+  try {
+    console.log("Schedule List request for user:", req.user);
+    const { periphId } = req.body;
+
+    if (!periphId) {
+      return res.status(400).json({ error: 'periphId is required in the request body.' });
+    }
+
+    // FIX 1: Assign the returned array directly to a variable (e.g., 'jobs')
+    const jobs = await agenda.jobs({
+      'name': 'posChangeScheduled',
+      'data.changedPosList': { $size: 1 }, 
+      'data.changedPosList.0.periphID': periphId,
+      'data.userID': req.user
+    });
+
+    // FIX 2: Use .filter() and .map() to handle all cases cleanly.
+    // This creates a cleaner, more predictable transformation pipeline.
+    const details = jobs
+      // Step 1: Filter out any jobs that are not recurring.
+      .filter(job => job.attrs.repeatInterval) 
+      // Step 2: Map the remaining recurring jobs to our desired format.
+      .map(job => {
+        const { repeatInterval, data, repeatTimezone } = job.attrs;
+        try {
+          const interval = cronParser.parseExpression(repeatInterval, {
+            tz: repeatTimezone || undefined 
+          });
+          const fields = interval.fields;
+
+          // Make sure to declare the variable
+          const parsedSchedule = {
+            minutes: fields.minute,
+            hours: fields.hour,
+            daysOfMonth: fields.dayOfMonth,
+            months: fields.month,
+            daysOfWeek: fields.dayOfWeek,
+          };
+
+          return {
+            id: job.attrs._id, // It's good practice to return the job ID
+            schedule: parsedSchedule,
+            pos: data.changedPosList[0].pos
+          };
+        } catch (err) {
+          // If parsing fails for a specific job, log it and filter it out.
+          console.error(`Could not parse "${repeatInterval}" for job ${job.attrs._id}. Skipping.`);
+          return null; // Return null for now
+        }
+      })
+      // Step 3: Filter out any nulls that resulted from a parsing error.
+      .filter(detail => detail !== null);
+
+    res.status(200).json({ scheduledUpdates: details });
+
+  } catch (error) { // FIX 3: Capture and log the actual error
+    console.error("Error in /periph_schedule_list:", error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });

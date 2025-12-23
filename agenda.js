@@ -81,10 +81,10 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
           return rest;
       });
 
-      const posWithoutNumber = changedPosList.map(pos => {
-          const { periphNum, ...rest } = pos;
-          return rest;
-      });
+      // const posWithoutNumber = changedPosList.map(pos => {
+      //     const { periphNum, ...rest } = pos;
+      //     return rest;
+      // });
 
       for (const pos of changedPosList) {
         const result = await sharedPgPool.query("update peripherals set last_pos=$1, last_set=$2 where id=$3 and user_id=$4",
