@@ -80,13 +80,48 @@ io.on('connection', async (socket) => {
     }
 
     else {
-      const successResponse = {
-        type: 'success',
-        code: 200,
-        message: 'Device found'
-      };
-      console.log("success");
-      socket.emit("success", successResponse);
+      console.log("success - sending device state");
+      
+      // For peripheral devices, send current device state
+      if (payload.type === "peripheral") {
+        try {
+          // Get peripheral states for this device
+          const {rows: periphRows} = await pool.query(
+            "select last_pos, peripheral_number, await_calib, calibrated from peripherals where device_id=$1",
+            [id]
+          );
+          
+          const successResponse = {
+            type: 'success',
+            code: 200,
+            message: 'Device authenticated',
+            deviceState: periphRows.map(row => ({
+              port: row.peripheral_number,
+              lastPos: row.last_pos,
+              awaitCalib: row.await_calib,
+              calibrated: row.calibrated
+            }))
+          };
+          
+          socket.emit("device_init", successResponse);
+        } catch (err) {
+          console.error("Error fetching device state:", err);
+          socket.emit("device_init", {
+            type: 'success',
+            code: 200,
+            message: 'Device authenticated',
+            deviceState: []
+          });
+        }
+      } else {
+        // User connection
+        const successResponse = {
+          type: 'success',
+          code: 200,
+          message: 'User connected'
+        };
+        socket.emit("success", successResponse);
+      }
     }
 
   } catch (error) {
@@ -270,10 +305,11 @@ app.get('/device_list', authenticateToken, async (req, res) => {
   try {
     console.log("device List request");
     console.log(req.user);
-    const {rows} = await pool.query('select id, device_name from devices where user_id = $1', [req.user]);
+    const {rows} = await pool.query('select id, device_name, max_ports from devices where user_id = $1', [req.user]);
     const deviceNames = rows.map(row => row.device_name);
     const deviceIds = rows.map(row => row.id);
-    res.status(200).json({ device_ids: deviceIds, devices: deviceNames });
+    const maxPorts = rows.map(row => row.max_ports);
+    res.status(200).json({ device_ids: deviceIds, devices: deviceNames, max_ports: maxPorts });
   } catch {
     res.status(500).json({error: 'Internal Server Error'});
   }
@@ -283,11 +319,12 @@ app.get('/device_name', authenticateToken, async (req, res) => {
   console.log("deviceName");
   try {
     const {deviceId} = req.query;
-    const {rows} = await pool.query('select device_name from devices where id=$1 and user_id=$2',
+    const {rows} = await pool.query('select device_name, max_ports from devices where id=$1 and user_id=$2',
       [deviceId, req.user]);
     if (rows.length != 1) return res.sendStatus(404);
     const deviceName = rows[0].device_name;
-    res.status(200).json({device_name: deviceName});
+    const maxPorts = rows[0].max_ports;
+    res.status(200).json({device_name: deviceName, max_ports: maxPorts});
   } catch {
     res.sendStatus(500);
   }
@@ -313,10 +350,11 @@ app.post('/add_device', authenticateToken, async (req, res) => {
     console.log("add device request");
     console.log(req.user);
     console.log(req.peripheral);
-    const {deviceName} = req.body;
+    const {deviceName, maxPorts} = req.body;
     console.log(deviceName);
-    const {rows} = await pool.query("insert into devices (user_id, device_name) values ($1, $2) returning id",
-      [req.user, deviceName]
+    const ports = maxPorts || 4; // Default to 4 for multi-port devices
+    const {rows} = await pool.query("insert into devices (user_id, device_name, max_ports) values ($1, $2, $3) returning id",
+      [req.user, deviceName, ports]
     ); // finish token return based on device ID.
     const deviceInitToken = await createTempPeriphToken(rows[0].id);
     res.status(201).json({token: deviceInitToken});
@@ -346,11 +384,39 @@ app.get('/verify_device', authenticateToken, async (req, res) => {
   console.log("device verify");
   try{
     console.log(req.peripheral);
+    
+    // Check if this is a single-port device
+    const {rows: deviceRows} = await pool.query("select max_ports, user_id from devices where id=$1", [req.peripheral]);
+    if (deviceRows.length === 0) {
+      return res.status(404).json({error: "Device not found"});
+    }
+    
+    const maxPorts = deviceRows[0].max_ports;
+    const userId = deviceRows[0].user_id;
+    
+    // For single-port devices, automatically create the peripheral if it doesn't exist
+    if (maxPorts === 1) {
+      const {rows: periphRows} = await pool.query(
+        "select id from peripherals where device_id=$1", 
+        [req.peripheral]
+      );
+      
+      if (periphRows.length === 0) {
+        // Create default peripheral for C6 device
+        await pool.query(
+          "insert into peripherals (device_id, peripheral_number, peripheral_name, user_id) values ($1, 1, $2, $3)",
+          [req.peripheral, "Main Blind", userId]
+        );
+        console.log("Created default peripheral for single-port device");
+      }
+    }
+    
     await pool.query("delete from device_tokens where device_id=$1", [req.peripheral]);
     const newToken = await createPeripheralToken(req.peripheral);
     console.log("New Token", newToken);
     res.json({token: newToken, id: req.peripheral});
-  } catch {
+  } catch (error) {
+    console.error("Error in verify_device:", error);
     res.status(500).json({error: "server error"});
   }
 });
@@ -508,10 +574,32 @@ app.post('/delete_device', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Device not found' });
     }
 
+    // Get socket ID before deleting tokens
+    const {rows: tokenRows} = await pool.query(
+      "select socket from device_tokens where device_id=$1 and connected=TRUE", 
+      [rows[0].id]
+    );
+
+    // Delete device tokens
     await pool.query("delete from device_tokens where device_id=$1", [rows[0].id]);
 
+    // Forcefully disconnect the Socket.IO connection if device is connected
+    if (tokenRows.length > 0) {
+      tokenRows.forEach(row => {
+        if (row.socket) {
+          const socket = io.sockets.sockets.get(row.socket);
+          if (socket) {
+            console.log(`Forcefully disconnecting device socket ${row.socket}`);
+            socket.emit('device_deleted', { message: 'Device has been deleted from the account' });
+            socket.disconnect(true);
+          }
+        }
+      });
+    }
+
     res.sendStatus(204);
-  } catch {
+  } catch (error) {
+    console.error("Error deleting device:", error);
     res.status(500).json({error: "server error"});
   }
 });
