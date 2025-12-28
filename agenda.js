@@ -25,11 +25,23 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
       if (result.rowCount != 1) throw new Error("No such peripheral in database");
 
       const {rows} = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [result.rows[0].device_id]);
-      if (rows.length != 1) console.log("No device with that ID connected to Socket.");
+      if (rows.length != 1) {
+        console.log("No device with that ID connected to Socket.");
+        // Notify user that device is not connected
+        const {rows: userRows} = await sharedPgPool.query("select socket from user_tokens where user_id=$1", [userID]);
+        if (userRows.length == 1 && userRows[0]) {
+          socketIoInstance.to(userRows[0].socket).emit("calib_error", {
+            periphID: result.rows[0].id,
+            message: "Device not connected"
+          });
+        }
+        // Reset await_calib since calibration cannot proceed
+        await sharedPgPool.query("update peripherals set await_calib=FALSE where id=$1", [periphID]);
+      }
       else {
         const socket = rows[0].socket;
         if (socket) {
-          socketIoInstance.to(socket).emit("calib", {periphNum: result.rows[0].peripheral_number});
+          socketIoInstance.to(socket).emit("calib_start", {port: result.rows[0].peripheral_number});
         }
       }
 
@@ -61,7 +73,7 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
       else {
         const socket = rows[0].socket;
         if (socket) {
-          socketIoInstance.to(socket).emit("cancel_calib", {periphNum: result.rows[0].peripheral_number});
+          socketIoInstance.to(socket).emit("cancel_calib", {port: result.rows[0].peripheral_number});
         }
       }
     } catch (error) {

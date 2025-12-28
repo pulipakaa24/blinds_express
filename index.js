@@ -87,7 +87,7 @@ io.on('connection', async (socket) => {
         try {
           // Get peripheral states for this device
           const {rows: periphRows} = await pool.query(
-            "select last_pos, peripheral_number, await_calib, calibrated from peripherals where device_id=$1",
+            "select last_pos, peripheral_number, calibrated from peripherals where device_id=$1",
             [id]
           );
           
@@ -98,12 +98,20 @@ io.on('connection', async (socket) => {
             deviceState: periphRows.map(row => ({
               port: row.peripheral_number,
               lastPos: row.last_pos,
-              awaitCalib: row.await_calib,
               calibrated: row.calibrated
             }))
           };
           
           socket.emit("device_init", successResponse);
+          
+          // Notify user app that device is now connected
+          const {rows: deviceUserRows} = await pool.query("select user_id from devices where id=$1", [id]);
+          if (deviceUserRows.length === 1) {
+            const {rows: userRows} = await pool.query("select socket from user_tokens where user_id=$1 and connected=TRUE", [deviceUserRows[0].user_id]);
+            if (userRows.length === 1 && userRows[0]) {
+              io.to(userRows[0].socket).emit("device_connected", {deviceID: id});
+            }
+          }
         } catch (err) {
           console.error("Error fetching device state:", err);
           socket.emit("device_init", {
@@ -134,6 +142,111 @@ io.on('connection', async (socket) => {
     socket.disconnect(true);
   }
 
+  // Device acknowledges ready for stage 1 (tilt up)
+  socket.on('calib_stage1_ready', async (data) => {
+    console.log(`Device ready for stage 1 (tilt up): ${socket.id}`);
+    console.log(data);
+    try {
+      const {rows} = await pool.query("select device_id from device_tokens where socket=$1 and connected=TRUE", [socket.id]);
+      if (rows.length != 1) throw new Error("No device with that ID connected to Socket.");
+      
+      const result = await pool.query(
+        "select id, user_id from peripherals where device_id=$1 and peripheral_number=$2",
+        [rows[0].device_id, data.port]
+      );
+      if (result.rowCount != 1) throw new Error("No such peripheral in database");
+
+      const {rows: userRows} = await pool.query("select socket from user_tokens where user_id=$1", [result.rows[0].user_id]);
+      if (userRows.length == 1 && userRows[0]) {
+        const userSocket = userRows[0].socket;
+        io.to(userSocket).emit("calib_stage1_ready", {periphID: result.rows[0].id});
+      }
+    } catch (error) {
+      console.error(`Error in calib_stage1_ready:`, error);
+    }
+  });
+
+  // Device acknowledges ready for stage 2 (tilt down)
+  socket.on('calib_stage2_ready', async (data) => {
+    console.log(`Device ready for stage 2 (tilt down): ${socket.id}`);
+    console.log(data);
+    try {
+      const {rows} = await pool.query("select device_id from device_tokens where socket=$1 and connected=TRUE", [socket.id]);
+      if (rows.length != 1) throw new Error("No device with that ID connected to Socket.");
+      
+      const result = await pool.query(
+        "select id, user_id from peripherals where device_id=$1 and peripheral_number=$2",
+        [rows[0].device_id, data.port]
+      );
+      if (result.rowCount != 1) throw new Error("No such peripheral in database");
+
+      const {rows: userRows} = await pool.query("select socket from user_tokens where user_id=$1", [result.rows[0].user_id]);
+      if (userRows.length == 1 && userRows[0]) {
+        const userSocket = userRows[0].socket;
+        io.to(userSocket).emit("calib_stage2_ready", {periphID: result.rows[0].id});
+      }
+    } catch (error) {
+      console.error(`Error in calib_stage2_ready:`, error);
+    }
+  });
+
+  // User confirms stage 1 complete (tilt up done)
+  socket.on('user_stage1_complete', async (data) => {
+    console.log(`User confirms stage 1 complete: ${socket.id}`);
+    console.log(data);
+    try {
+      const {rows} = await pool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [data.deviceID]);
+      if (rows.length != 1) {
+        // Device not connected - notify app
+        socket.emit("calib_error", {
+          periphID: data.periphID,
+          message: "Device disconnected during calibration"
+        });
+        // Reset peripheral state
+        await pool.query("update peripherals set await_calib=FALSE where id=$1", [data.periphID]);
+        return;
+      }
+      
+      const deviceSocket = rows[0].socket;
+      io.to(deviceSocket).emit("user_stage1_complete", {port: data.periphNum});
+    } catch (error) {
+      console.error(`Error in user_stage1_complete:`, error);
+      socket.emit("calib_error", {
+        periphID: data.periphID,
+        message: "Error during calibration"
+      });
+    }
+  });
+
+  // User confirms stage 2 complete (tilt down done)
+  socket.on('user_stage2_complete', async (data) => {
+    console.log(`User confirms stage 2 complete: ${socket.id}`);
+    console.log(data);
+    try {
+      const {rows} = await pool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [data.deviceID]);
+      if (rows.length != 1) {
+        // Device not connected - notify app
+        socket.emit("calib_error", {
+          periphID: data.periphID,
+          message: "Device disconnected during calibration"
+        });
+        // Reset peripheral state
+        await pool.query("update peripherals set await_calib=FALSE where id=$1", [data.periphID]);
+        return;
+      }
+      
+      const deviceSocket = rows[0].socket;
+      io.to(deviceSocket).emit("user_stage2_complete", {port: data.periphNum});
+    } catch (error) {
+      console.error(`Error in user_stage2_complete:`, error);
+      socket.emit("calib_error", {
+        periphID: data.periphID,
+        message: "Error during calibration"
+      });
+    }
+  });
+
+  // Device acknowledges calibration complete
   socket.on('calib_done', async (data) => {
     console.log(`Received 'calib_done' event from client ${socket.id}:`);
     console.log(data); 
@@ -194,7 +307,21 @@ io.on('connection', async (socket) => {
     }
     else {
       console.log("device disconnect");
-      await pool.query("update device_tokens set connected=FALSE where socket=$1", [socket.id]);
+      const {rows} = await pool.query(
+        "update device_tokens set connected=FALSE where socket=$1 returning device_id",
+        [socket.id]
+      );
+      
+      // Notify user app that device disconnected
+      if (rows.length === 1) {
+        const {rows: deviceRows} = await pool.query("select user_id from devices where id=$1", [rows[0].device_id]);
+        if (deviceRows.length === 1) {
+          const {rows: userRows} = await pool.query("select socket from user_tokens where user_id=$1 and connected=TRUE", [deviceRows[0].user_id]);
+          if (userRows.length === 1 && userRows[0]) {
+            io.to(userRows[0].socket).emit("device_disconnected", {deviceID: rows[0].device_id});
+          }
+        }
+      }
     }
   });
 });
@@ -515,6 +642,26 @@ app.get('/peripheral_name', authenticateToken, async (req, res) => {
     );
     if (rows.length != 1) return res.sendStatus(404);
     res.status(200).json({name: rows[0].peripheral_name});
+  } catch {
+    res.sendStatus(500);
+  }
+})
+
+app.get('/device_connection_status', authenticateToken, async (req, res) => {
+  console.log("device connection status");
+  try {
+    const {deviceId} = req.query;
+    // Verify device belongs to user
+    const {rows: deviceRows} = await pool.query("select id from devices where id=$1 and user_id=$2",
+      [deviceId, req.user]
+    );
+    if (deviceRows.length != 1) return res.sendStatus(404);
+    
+    // Check if device has an active socket connection
+    const {rows} = await pool.query("select connected from device_tokens where device_id=$1 and connected=TRUE",
+      [deviceId]
+    );
+    res.status(200).json({connected: rows.length > 0});
   } catch {
     res.sendStatus(500);
   }
