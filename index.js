@@ -6,7 +6,7 @@ require('dotenv').config();
 const jwt = require('jsonwebtoken');
 const http = require('http');
 const socketIo = require('socket.io');
-const connectDB = require('./db'); // Your Mongoose DB connection
+const connectDB = require('./db');
 const { initializeAgenda } = require('./agenda'); // Agenda setup
 const format = require('pg-format');
 const cronParser = require('cron-parser');
@@ -24,7 +24,7 @@ const io = socketIo(server, {
 let agenda;
 
 (async () => {
-    // 1. Connect to MongoDB (for your application data)
+    // 1. Connect to MongoDB
     await connectDB();
     
     agenda = await initializeAgenda('mongodb://localhost:27017/myScheduledApp', pool, io);
@@ -85,9 +85,9 @@ io.on('connection', async (socket) => {
       // For peripheral devices, send current device state
       if (payload.type === "peripheral") {
         try {
-          // Get peripheral states for this device
+          // Get peripheral states for this device (device will report calibration status back)
           const {rows: periphRows} = await pool.query(
-            "select last_pos, peripheral_number, calibrated from peripherals where device_id=$1",
+            "select last_pos, peripheral_number from peripherals where device_id=$1",
             [id]
           );
           
@@ -97,8 +97,7 @@ io.on('connection', async (socket) => {
             message: 'Device authenticated',
             deviceState: periphRows.map(row => ({
               port: row.peripheral_number,
-              lastPos: row.last_pos,
-              calibrated: row.calibrated
+              lastPos: row.last_pos
             }))
           };
           
@@ -141,6 +140,55 @@ io.on('connection', async (socket) => {
     // Disconnect the client
     socket.disconnect(true);
   }
+
+  // Device reports its calibration status after connection
+  socket.on('report_calib_status', async (data) => {
+    console.log(`Device reporting calibration status: ${socket.id}`);
+    console.log(data);
+    try {
+      const {rows} = await pool.query("select device_id from device_tokens where socket=$1 and connected=TRUE", [socket.id]);
+      if (rows.length != 1) throw new Error("No device with that ID connected to Socket.");
+      
+      // Update calibration status in database based on device's actual state
+      if (data.port && typeof data.calibrated === 'boolean') {
+        await pool.query(
+          "update peripherals set calibrated=$1 where device_id=$2 and peripheral_number=$3",
+          [data.calibrated, rows[0].device_id, data.port]
+        );
+        console.log(`Updated port ${data.port} calibrated status to ${data.calibrated}`);
+      }
+    } catch (error) {
+      console.error(`Error in report_calib_status:`, error);
+    }
+  });
+
+  // Device reports calibration error (motor stall, sensor failure, etc.)
+  socket.on('device_calib_error', async (data) => {
+    console.log(`Device reporting calibration error: ${socket.id}`);
+    console.log(data);
+    try {
+      const {rows} = await pool.query("select device_id from device_tokens where socket=$1 and connected=TRUE", [socket.id]);
+      if (rows.length != 1) throw new Error("No device with that ID connected to Socket.");
+      
+      const result = await pool.query(
+        "update peripherals set await_calib=FALSE where device_id=$1 and peripheral_number=$2 returning id, user_id",
+        [rows[0].device_id, data.port]
+      );
+      if (result.rowCount != 1) throw new Error("No such peripheral in database");
+      
+      // Notify user app about the error
+      const {rows: userRows} = await pool.query("select socket from user_tokens where user_id=$1 and connected=TRUE", [result.rows[0].user_id]);
+      if (userRows.length === 1 && userRows[0]) {
+        io.to(userRows[0].socket).emit("calib_error", {
+          periphID: result.rows[0].id,
+          message: data.message || "Device error during calibration"
+        });
+      }
+      console.log(`Calibration cancelled for port ${data.port} due to device error`);
+    } catch (error) {
+      console.error(`Error in device_calib_error:`, error);
+    }
+  });
 
   // Device acknowledges ready for stage 1 (tilt up)
   socket.on('calib_stage1_ready', async (data) => {
