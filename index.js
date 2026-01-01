@@ -10,6 +10,7 @@ const connectDB = require('./db');
 const { initializeAgenda } = require('./agenda'); // Agenda setup
 const format = require('pg-format');
 const cronParser = require('cron-parser');
+const { ObjectId } = require('mongodb');
 
 const app = express();
 const port = 3000;
@@ -814,6 +815,170 @@ app.post('/delete_peripheral', authenticateToken, async (req, res) => {
     res.sendStatus(500);
   }
 })
+
+// Helper function to create cron expression from time and days
+function createCronExpression(time, daysOfWeek) {
+  const cronDays = daysOfWeek.join(',');
+  return `${time.minute} ${time.hour} * * ${cronDays}`;
+}
+
+// Helper function to find and verify a schedule job belongs to the user
+async function findUserScheduleJob(jobId, userId) {
+  const jobs = await agenda.jobs({
+    _id: new ObjectId(jobId),
+    'data.userID': userId
+  });
+  return jobs.length === 1 ? jobs[0] : null;
+}
+
+app.post('/add_schedule', authenticateToken, async (req, res) => {
+  console.log("add schedule");
+  try {
+    const {periphId, periphNum, deviceId, newPos, time, daysOfWeek} = req.body;
+    
+    // Validate required fields
+    if (!periphId || periphNum === undefined || !deviceId || newPos === undefined || !time || !daysOfWeek || daysOfWeek.length === 0) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Create cron expression
+    const cronExpression = createCronExpression(time, daysOfWeek);
+    
+    // Check for duplicate schedule
+    const existingJobs = await agenda.jobs({
+      'name': 'posChangeScheduled',
+      'data.changedPosList.0.periphID': periphId,
+      'data.userID': req.user
+    });
+    
+    // Check if any existing job has the same cron expression (time + days)
+    const duplicate = existingJobs.find(job => {
+      const jobCron = job.attrs.repeatInterval;
+      return jobCron === cronExpression;
+    });
+    
+    if (duplicate) {
+      console.log("Duplicate schedule detected");
+      return res.status(409).json({
+        success: false,
+        message: 'A schedule with the same time and days already exists for this blind',
+        duplicate: true
+      });
+    }
+    
+    const changedPosList = [{periphNum: periphNum, periphID: periphId, pos: newPos}];
+    
+    // Schedule the recurring job
+    const job = await agenda.create('posChangeScheduled', {
+      deviceID: deviceId,
+      changedPosList: changedPosList,
+      userID: req.user
+    });
+    
+    job.repeatEvery(cronExpression, {
+      skipImmediate: true
+    });
+    
+    await job.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Schedule created successfully',
+      jobId: job.attrs._id
+    });
+  } catch (error) {
+    console.error('Error creating schedule:', error);
+    res.status(500).json({ success: false, message: 'Failed to create schedule', error: error.message });
+  }
+});
+
+app.post('/delete_schedule', authenticateToken, async (req, res) => {
+  console.log("delete schedule");
+  try {
+    const {jobId} = req.body;
+    
+    if (!jobId) {
+      return res.status(400).json({ error: 'Missing jobId' });
+    }
+
+    // Find and verify the existing job belongs to the user
+    const existingJob = await findUserScheduleJob(jobId, req.user);
+    
+    if (!existingJob) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    // Remove the job
+    await existingJob.remove();
+    console.log("Schedule deleted successfully:", jobId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Schedule deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting schedule:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete schedule', error: error.message });
+  }
+});
+
+app.post('/update_schedule', authenticateToken, async (req, res) => {
+  console.log("update schedule");
+  console.log("Request body:", req.body);
+  try {
+    const {jobId, periphId, periphNum, deviceId, newPos, time, daysOfWeek} = req.body;
+    
+    console.log("jobId type:", typeof jobId, "value:", jobId);
+    
+    // Validate required fields
+    if (!jobId || !periphId || periphNum === undefined || !deviceId || newPos === undefined || !time || !daysOfWeek || daysOfWeek.length === 0) {
+      console.log("Missing required fields");
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Find and verify the existing job belongs to the user
+    console.log("Searching for job with _id:", jobId, "and userID:", req.user);
+    const existingJob = await findUserScheduleJob(jobId, req.user);
+    
+    console.log("Found job:", existingJob ? 'yes' : 'no');
+    if (!existingJob) {
+      console.log("Schedule not found");
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    console.log("Removing old job...");
+    // Cancel the old job
+    await existingJob.remove();
+
+    // Create cron expression
+    const cronExpression = createCronExpression(time, daysOfWeek);
+    const changedPosList = [{periphNum: periphNum, periphID: periphId, pos: newPos}];
+    
+    console.log("Creating new job with cron:", cronExpression);
+    // Create new job with updated schedule
+    const job = await agenda.create('posChangeScheduled', {
+      deviceID: deviceId,
+      changedPosList: changedPosList,
+      userID: req.user
+    });
+    
+    job.repeatEvery(cronExpression, {
+      skipImmediate: true
+    });
+    
+    await job.save();
+    console.log("Job saved successfully with ID:", job.attrs._id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Schedule updated successfully',
+      jobId: job.attrs._id
+    });
+  } catch (error) {
+    console.error('Error updating schedule:', error);
+    res.status(500).json({ success: false, message: 'Failed to update schedule', error: error.message });
+  }
+});
 
 server.listen(port, () => {
   console.log(`Example app listening at http://localhost:${port}`);
