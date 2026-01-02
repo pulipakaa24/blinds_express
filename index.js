@@ -1046,3 +1046,222 @@ app.post('/periph_schedule_list', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+app.get('/group_list', authenticateToken, async (req, res) => {
+  console.log("group_list request for user:", req.user);
+  try {
+    // Get all groups for the user - no joins needed for menu view
+    const {rows} = await pool.query(
+      'SELECT id, name, created_at FROM groups WHERE user_id = $1 ORDER BY name',
+      [req.user]
+    );
+
+    res.status(200).json({ groups: rows });
+  } catch (error) {
+    console.error("Error in /group_list:", error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/add_group', authenticateToken, async (req, res) => {
+  console.log("add_group request for user:", req.user);
+  try {
+    const { name, peripheral_ids } = req.body;
+
+    // Validate input
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Group name is required' });
+    }
+    // if (!peripheral_ids || !Array.isArray(peripheral_ids) || peripheral_ids.length < 2) {
+
+    if (!peripheral_ids || !Array.isArray(peripheral_ids)) {
+      return res.status(400).json({ error: 'At least 2 peripherals are required' });
+    }
+
+    // Verify all peripherals belong to the user
+    const verifyQuery = `
+      SELECT id FROM peripherals 
+      WHERE id = ANY($1) AND user_id = $2
+    `;
+    const { rows: verifiedPeripherals } = await pool.query(verifyQuery, [peripheral_ids, req.user]);
+
+    if (verifiedPeripherals.length !== peripheral_ids.length) {
+      return res.status(403).json({ error: 'Invalid peripheral IDs' });
+    }
+
+    // Sort peripheral IDs for consistent comparison
+    const sortedPeripheralIds = [...peripheral_ids].sort((a, b) => a - b);
+
+    // Check if a group with this exact set of peripherals already exists
+    const duplicateCheckQuery = `
+      SELECT g.id, g.name
+      FROM groups g
+      JOIN group_peripherals gp ON g.id = gp.group_id
+      WHERE g.user_id = $1
+      GROUP BY g.id
+      HAVING array_agg(gp.peripheral_id ORDER BY gp.peripheral_id) = $2::int[]
+    `;
+    const { rows: duplicateGroups } = await pool.query(duplicateCheckQuery, [req.user, sortedPeripheralIds]);
+
+    if (duplicateGroups.length > 0) {
+      return res.status(409).json({ 
+        error: `A group named "${duplicateGroups[0].name}" already contains these exact blinds`,
+        duplicate: true,
+        existing_group_name: duplicateGroups[0].name
+      });
+    }
+
+    // Insert into groups table
+    const insertGroupQuery = `
+      INSERT INTO groups (user_id, name) 
+      VALUES ($1, $2) 
+      RETURNING id
+    `;
+    const { rows: groupRows } = await pool.query(insertGroupQuery, [req.user, name.trim()]);
+    const groupId = groupRows[0].id;
+
+    // Insert into group_peripherals table
+    const insertPeripheralsQuery = `
+      INSERT INTO group_peripherals (group_id, peripheral_id) 
+      VALUES ${peripheral_ids.map((_, i) => `($1, $${i + 2})`).join(', ')}
+    `;
+    await pool.query(insertPeripheralsQuery, [groupId, ...peripheral_ids]);
+
+    res.status(201).json({ 
+      success: true, 
+      group_id: groupId,
+      message: 'Group created successfully' 
+    });
+  } catch (error) {
+    console.error("Error in /add_group:", error);
+    
+    // Handle unique constraint violation (duplicate group name)
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'A group with this name already exists' });
+    }
+    
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/delete_group', authenticateToken, async (req, res) => {
+  console.log("delete_group request for user:", req.user);
+  try {
+    const { groupId } = req.body;
+
+    if (!groupId) {
+      return res.status(400).json({ error: 'Group ID is required' });
+    }
+
+    // Delete the group - CASCADE will automatically delete group_peripherals entries
+    const { rows } = await pool.query(
+      'DELETE FROM groups WHERE id = $1 AND user_id = $2 RETURNING id, name',
+      [groupId, req.user]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    console.log(`Group "${rows[0].name}" deleted successfully`);
+    res.sendStatus(204);
+  } catch (error) {
+    console.error("Error in /delete_group:", error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/group_details', authenticateToken, async (req, res) => {
+  console.log("group_details request for user:", req.user);
+  try {
+    const { groupId } = req.query;
+
+    if (!groupId) {
+      return res.status(400).json({ error: 'Group ID is required' });
+    }
+
+    // Get group info and all peripherals with their device info
+    const { rows } = await pool.query(`
+      SELECT 
+        g.id as group_id,
+        g.name as group_name,
+        json_agg(
+          json_build_object(
+            'peripheral_id', p.id,
+            'peripheral_name', p.peripheral_name,
+            'peripheral_number', p.peripheral_number,
+            'device_id', p.device_id,
+            'last_pos', p.last_pos,
+            'calibrated', p.calibrated
+          ) ORDER BY p.peripheral_name
+        ) as peripherals
+      FROM groups g
+      JOIN group_peripherals gp ON g.id = gp.group_id
+      JOIN peripherals p ON gp.peripheral_id = p.id
+      WHERE g.id = $1 AND g.user_id = $2
+      GROUP BY g.id, g.name
+    `, [groupId, req.user]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    res.status(200).json(rows[0]);
+  } catch (error) {
+    console.error("Error in /group_details:", error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/group_position_update', authenticateToken, async (req, res) => {
+  console.log("group_position_update request for user:", req.user);
+  try {
+    const { groupId, newPos } = req.body;
+
+    if (!groupId || newPos === undefined) {
+      return res.status(400).json({ error: 'Group ID and position are required' });
+    }
+
+    // Get all peripherals in the group with their device info
+    const { rows: peripherals } = await pool.query(`
+      SELECT p.id, p.peripheral_number, p.device_id
+      FROM group_peripherals gp
+      JOIN peripherals p ON gp.peripheral_id = p.id
+      JOIN groups g ON gp.group_id = g.id
+      WHERE g.id = $1 AND g.user_id = $2
+    `, [groupId, req.user]);
+
+    if (peripherals.length === 0) {
+      return res.status(404).json({ error: 'Group not found or empty' });
+    }
+
+    // Group peripherals by device to send commands efficiently
+    const deviceMap = new Map();
+    peripherals.forEach(p => {
+      if (!deviceMap.has(p.device_id)) {
+        deviceMap.set(p.device_id, []);
+      }
+      deviceMap.get(p.device_id).push({
+        periphNum: p.peripheral_number,
+        periphID: p.id,
+        pos: newPos
+      });
+    });
+
+    // Schedule position change jobs for each device
+    const jobPromises = Array.from(deviceMap.entries()).map(([deviceId, changedPosList]) => 
+      agenda.now('posChange', { deviceID: deviceId, changedPosList, userID: req.user })
+    );
+
+    await Promise.all(jobPromises);
+
+    res.status(202).json({
+      success: true,
+      message: 'Group position update accepted',
+      peripherals_updated: peripherals.length
+    });
+  } catch (error) {
+    console.error("Error in /group_position_update:", error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
