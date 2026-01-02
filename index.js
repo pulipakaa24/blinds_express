@@ -597,21 +597,22 @@ app.get('/verify_device', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/position', authenticateToken, async (req, res) => {
-  console.log("devicepos");
-  try {
-    const {rows} = await pool.query("select last_pos, peripheral_number, await_calib from peripherals where device_id=$1",
-      [req.peripheral]);
+// no longer polling server - using webSocket
+// app.get('/position', authenticateToken, async (req, res) => {
+//   console.log("devicepos");
+//   try {
+//     const {rows} = await pool.query("select last_pos, peripheral_number, await_calib from peripherals where device_id=$1",
+//       [req.peripheral]);
 
-    if (rows.length == 0) {
-      return res.sendStatus(404);
-    }
+//     if (rows.length == 0) {
+//       return res.sendStatus(404);
+//     }
 
-    res.status(200).json(rows);
-  } catch {
-    res.status(500).json({error: "server error"});
-  }
-});
+//     res.status(200).json(rows);
+//   } catch {
+//     res.status(500).json({error: "server error"});
+//   }
+// });
 
 app.post('/manual_position_update', authenticateToken, async (req, res) => {
   console.log("setpos");
