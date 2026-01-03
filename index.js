@@ -760,6 +760,85 @@ app.post('/rename_peripheral', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/rename_group', authenticateToken, async (req, res) => {
+  console.log("Rename group");
+  try {
+    const {groupId, newName} = req.body;
+    const result = await pool.query("update groups set name=$1 where id=$2 and user_id=$3", [newName, groupId, req.user]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Group not found' });
+    res.sendStatus(204);
+  } catch (err) {
+    if (err.code == '23505') return res.status(409).json({ error: 'Group name must be unique' });
+    console.error(err);
+    res.sendStatus(500);
+  }
+});
+
+app.post('/update_group', authenticateToken, async (req, res) => {
+  console.log("Update group members");
+  try {
+    const { groupId, peripheral_ids } = req.body;
+
+    if (!groupId || !peripheral_ids || !Array.isArray(peripheral_ids)) {
+      return res.status(400).json({ error: 'Invalid request parameters' });
+    }
+
+    // Verify group belongs to user
+    const {rows: groupRows} = await pool.query(
+      'SELECT id FROM groups WHERE id=$1 AND user_id=$2',
+      [groupId, req.user]
+    );
+
+    if (groupRows.length === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    // Verify all peripherals belong to user
+    const {rows: periphRows} = await pool.query(
+      'SELECT id FROM peripherals WHERE id = ANY($1::int[]) AND user_id=$2',
+      [peripheral_ids, req.user]
+    );
+
+    if (periphRows.length !== peripheral_ids.length) {
+      return res.status(403).json({ error: 'One or more peripherals do not belong to you' });
+    }
+
+    // Check if this exact peripheral set already exists in another group
+    const {rows: duplicateRows} = await pool.query(
+      `SELECT g.id, g.name
+       FROM groups g
+       JOIN (
+         SELECT group_id, array_agg(peripheral_id ORDER BY peripheral_id) as periph_set
+         FROM group_peripherals
+         GROUP BY group_id
+       ) gp ON g.id = gp.group_id
+       WHERE gp.periph_set = $1::int[]
+       AND g.user_id = $2
+       AND g.id != $3`,
+      [peripheral_ids.sort((a, b) => a - b), req.user, groupId]
+    );
+
+    if (duplicateRows.length > 0) {
+      return res.status(409).json({ 
+        error: 'This combination of blinds already exists in another group',
+        existing_group: duplicateRows[0].name 
+      });
+    }
+
+    // Delete existing group_peripherals entries
+    await pool.query('DELETE FROM group_peripherals WHERE group_id=$1', [groupId]);
+
+    // Insert new group_peripherals entries
+    const insertValues = peripheral_ids.map(pid => `(${groupId}, ${pid})`).join(',');
+    await pool.query(`INSERT INTO group_peripherals (group_id, peripheral_id) VALUES ${insertValues}`);
+
+    res.status(200).json({ success: true, message: 'Group updated successfully' });
+  } catch (error) {
+    console.error('Error updating group:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.post('/delete_device', authenticateToken, async (req, res) => {
   console.log("delete device");
   try {
@@ -1265,3 +1344,180 @@ app.post('/group_position_update', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+app.post('/add_group_schedule', authenticateToken, async (req, res) => {
+  console.log("add_group_schedule");
+  try {
+    const { groupId, newPos, time, daysOfWeek } = req.body;
+
+    if (!groupId || newPos === undefined || !time || !daysOfWeek || !Array.isArray(daysOfWeek)) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Verify group belongs to user
+    const {rows: groupRows} = await pool.query(
+      'SELECT id FROM groups WHERE id=$1 AND user_id=$2',
+      [groupId, req.user]
+    );
+
+    if (groupRows.length === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    // Check for duplicate schedule
+    const cronExpression = createCronExpression(time, daysOfWeek);
+    const existingJobs = await agenda.jobs({
+      name: 'groupPosChangeScheduled',
+      'data.groupID': groupId,
+      'data.userID': req.user
+    });
+
+    for (const existingJob of existingJobs) {
+      if (existingJob.attrs.repeatInterval === cronExpression && existingJob.attrs.data.newPos === newPos) {
+        return res.status(409).json({ error: 'Duplicate schedule already exists' });
+      }
+    }
+
+    // Create the job
+    const job = await agenda.create('groupPosChangeScheduled', {
+      groupID: groupId,
+      newPos,
+      userID: req.user
+    });
+
+    job.repeatEvery(cronExpression, {
+      timezone: 'America/New_York',
+      skipImmediate: true
+    });
+
+    await job.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Group schedule created successfully',
+      jobId: job.attrs._id
+    });
+  } catch (error) {
+    console.error('Error creating group schedule:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/delete_group_schedule', authenticateToken, async (req, res) => {
+  console.log("delete_group_schedule");
+  try {
+    const { jobId } = req.body;
+
+    if (!jobId) {
+      return res.status(400).json({ error: 'Missing jobId' });
+    }
+
+    const job = await findUserScheduleJob(jobId, req.user);
+    if (!job) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    await job.remove();
+    res.status(200).json({ success: true, message: 'Group schedule deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting group schedule:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/update_group_schedule', authenticateToken, async (req, res) => {
+  console.log("update_group_schedule");
+  try {
+    const { jobId, newPos, time, daysOfWeek } = req.body;
+
+    if (!jobId || newPos === undefined || !time || !daysOfWeek) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const job = await findUserScheduleJob(jobId, req.user);
+    if (!job) {
+      return res.status(404).json({ error: 'Schedule not found' });
+    }
+
+    const groupId = job.attrs.data.groupID;
+    const cronExpression = createCronExpression(time, daysOfWeek);
+
+    // Check for duplicates excluding current job
+    const existingJobs = await agenda.jobs({
+      name: 'groupPosChangeScheduled',
+      'data.groupID': groupId,
+      'data.userID': req.user,
+      _id: { $ne: new ObjectId(jobId) }
+    });
+
+    for (const existingJob of existingJobs) {
+      if (existingJob.attrs.repeatInterval === cronExpression && existingJob.attrs.data.newPos === newPos) {
+        return res.status(409).json({ error: 'Duplicate schedule already exists' });
+      }
+    }
+
+    // Update job
+    job.attrs.data.newPos = newPos;
+    job.repeatEvery(cronExpression, {
+      timezone: 'America/New_York',
+      skipImmediate: true
+    });
+
+    await job.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Group schedule updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating group schedule:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/group_schedule_list', authenticateToken, async (req, res) => {
+  try {
+    const { groupId } = req.body;
+
+    if (!groupId) {
+      return res.status(400).json({ error: 'Missing groupId' });
+    }
+
+    // Verify group belongs to user
+    const {rows: groupRows} = await pool.query(
+      'SELECT id FROM groups WHERE id=$1 AND user_id=$2',
+      [groupId, req.user]
+    );
+
+    if (groupRows.length === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const jobs = await agenda.jobs({
+      name: 'groupPosChangeScheduled',
+      'data.groupID': groupId,
+      'data.userID': req.user
+    });
+
+    const scheduledUpdates = jobs.map(job => {
+      const interval = cronParser.parseExpression(job.attrs.repeatInterval);
+      const schedule = {
+        minutes: interval.fields.minute,
+        hours: interval.fields.hour,
+        daysOfWeek: interval.fields.dayOfWeek
+      };
+
+      return {
+        id: job.attrs._id,
+        pos: job.attrs.data.newPos,
+        schedule
+      };
+    });
+
+    res.status(200).json({ scheduledUpdates });
+  } catch (error) {
+    console.error('Error fetching group schedules:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
