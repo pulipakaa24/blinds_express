@@ -1,34 +1,50 @@
-// agenda.js (modified to receive the already created pool)
-const Agenda = require('agenda');
+// agenda.js - Using pg-boss for PostgreSQL-based job scheduling
+const PgBoss = require('pg-boss');
 
-let agenda;
+let boss;
 let socketIoInstance;
 let sharedPgPool; // This will hold the pool instance passed from server.js
 
-const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
+const initializeAgenda = async (pool, io) => { // Only needs pool and io now
   socketIoInstance = io;
   sharedPgPool = pool; // Store the passed pool
 
-  agenda = new Agenda({
+  boss = new PgBoss({
     db: {
-      address: mongoUri || 'mongodb://localhost:27017/myScheduledApp',
-      collection: 'agendaJobs',
+      executeSql: async (text, values) => {
+        const result = await pool.query(text, values);
+        return result;
+      }
     }
   });
 
-  agenda.define('calib', async (job) => {
-    const {periphID, userID } = job.attrs.data;
+  boss.on('error', error => console.error('PgBoss error:', error));
+
+  await boss.start();
+  console.log('PgBoss started and ready!');
+
+  // Create queues for all job types
+  await boss.createQueue('calib');
+  await boss.createQueue('cancel_calib');
+  await boss.createQueue('posChange');
+  await boss.createQueue('posChangeScheduled');
+  await boss.createQueue('groupPosChangeScheduled');
+  console.log('Job queues created');
+
+  // Define job handlers
+  await boss.work('calib', async (job) => {
+    const { periphID, userID } = job.data;
     try {
       const result = await sharedPgPool.query("update peripherals set await_calib=TRUE, calibrated=FALSE where id=$1 and user_id=$2 returning device_id, peripheral_number, id",
         [periphID, userID]
       );
       if (result.rowCount != 1) throw new Error("No such peripheral in database");
 
-      const {rows} = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [result.rows[0].device_id]);
+      const { rows } = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [result.rows[0].device_id]);
       if (rows.length != 1) {
         console.log("No device with that ID connected to Socket.");
         // Notify user that device is not connected
-        const {rows: userRows} = await sharedPgPool.query("select socket from user_tokens where user_id=$1", [userID]);
+        const { rows: userRows } = await sharedPgPool.query("select socket from user_tokens where user_id=$1", [userID]);
         if (userRows.length == 1 && userRows[0]) {
           socketIoInstance.to(userRows[0].socket).emit("calib_error", {
             periphID: result.rows[0].id,
@@ -41,16 +57,16 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
       else {
         const socket = rows[0].socket;
         if (socket) {
-          socketIoInstance.to(socket).emit("calib_start", {port: result.rows[0].peripheral_number});
+          socketIoInstance.to(socket).emit("calib_start", { port: result.rows[0].peripheral_number });
         }
       }
 
-      const {rows: userRows} = await sharedPgPool.query("select socket from user_tokens where user_id=$1", [userID]);
+      const { rows: userRows } = await sharedPgPool.query("select socket from user_tokens where user_id=$1", [userID]);
 
       if (userRows.length == 1) {
-        if (userRows[0]){
+        if (userRows[0]) {
           const userSocket = userRows[0].socket;
-          socketIoInstance.to(userSocket).emit("calib", {periphID: result.rows[0].id});
+          socketIoInstance.to(userSocket).emit("calib", { periphID: result.rows[0].id });
         }
       }
       else console.log("No App connected");
@@ -60,37 +76,37 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
     }
   });
 
-  agenda.define('cancel_calib', async (job) => {
-    const {periphID, userID } = job.attrs.data;
+  await boss.work('cancel_calib', async (job) => {
+    const { periphID, userID } = job.data;
     try {
       const result = await sharedPgPool.query("update peripherals set await_calib=FALSE where id=$1 and user_id=$2 returning device_id, peripheral_number",
         [periphID, userID]
       );
       if (result.rowCount != 1) throw new Error("No such peripheral in database");
 
-      const {rows} = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [result.rows[0].device_id]);
+      const { rows } = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [result.rows[0].device_id]);
       if (rows.length != 1) console.log("No device with that ID connected to Socket.");
       else {
         const socket = rows[0].socket;
         if (socket) {
-          socketIoInstance.to(socket).emit("cancel_calib", {port: result.rows[0].peripheral_number});
+          socketIoInstance.to(socket).emit("cancel_calib", { port: result.rows[0].peripheral_number });
         }
       }
     } catch (error) {
       console.error(`Error processing job:`, error);
       throw error;
     }
-  })
+  });
 
-  agenda.define('posChange', async (job) => {
-    const { deviceID, changedPosList, userID } = job.attrs.data;
+  await boss.work('posChange', async (job) => {
+    const { deviceID, changedPosList, userID } = job.data;
     // changedPosList is of the structure [{periphNum, periphID, pos}]
     const dateTime = new Date();
     if (!changedPosList) console.log("undefined list");
     try {
       const posWithoutID = changedPosList.map(pos => {
-          const { periphID, ...rest } = pos;
-          return rest;
+        const { periphID, ...rest } = pos;
+        return rest;
       });
 
       // const posWithoutNumber = changedPosList.map(pos => {
@@ -105,7 +121,7 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
         if (result.rowCount != 1) throw new Error("No such peripheral in database");
       }
 
-      const {rows} = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [deviceID]);
+      const { rows } = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [deviceID]);
       if (rows.length != 1) console.log("No device with that ID connected to Socket.");
       else {
         const socket = rows[0].socket;
@@ -113,27 +129,28 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
           socketIoInstance.to(socket).emit("posUpdates", posWithoutID);
         }
       }
-      
+
     } catch (error) {
       console.error(`Error processing job:`, error);
       throw error;
     }
   });
 
-  agenda.define('posChangeScheduled', async (job) => {
-    const { deviceID, changedPosList, userID } = job.attrs.data;
+  await boss.work('posChangeScheduled', async (job) => {
+    console.log("posChangeScheduled job received");
+    const { deviceID, changedPosList, userID } = job.data;
     // changedPosList is of the structure [{periphNum, periphID, pos}]
     const dateTime = new Date();
     if (!changedPosList) console.log("undefined list");
     try {
       const posWithoutID = changedPosList.map(pos => {
-          const { periphID, ...rest } = pos;
-          return rest;
+        const { periphID, ...rest } = pos;
+        return rest;
       });
 
       const posWithoutNumber = changedPosList.map(pos => {
-          const { periphNum, ...rest } = pos;
-          return rest;
+        const { periphNum, ...rest } = pos;
+        return rest;
       });
 
       for (const pos of changedPosList) {
@@ -143,7 +160,7 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
         if (result.rowCount != 1) throw new Error("No such peripheral in database");
       }
 
-      const {rows} = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [deviceID]);
+      const { rows } = await sharedPgPool.query("select socket from device_tokens where device_id=$1 and connected=TRUE", [deviceID]);
       if (rows.length != 1) console.log("No device with that ID connected to Socket.");
       else {
         const socket = rows[0].socket;
@@ -152,28 +169,28 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
         }
       }
 
-      const {rows: userRows} = await sharedPgPool.query("select socket from user_tokens where user_id=$1", [userID]);
+      const { rows: userRows } = await sharedPgPool.query("select socket from user_tokens where user_id=$1", [userID]);
 
       if (userRows.length == 1) {
-        if (userRows[0]){
+        if (userRows[0]) {
           const userSocket = userRows[0].socket;
           socketIoInstance.to(userSocket).emit("posUpdates", posWithoutNumber);
         }
       }
       else console.log("No App connected");
-      
+
     } catch (error) {
       console.error(`Error processing job:`, error);
       throw error;
     }
   });
 
-  agenda.define('groupPosChangeScheduled', async (job) => {
-    const { groupID, newPos, userID } = job.attrs.data;
+  await boss.work('groupPosChangeScheduled', async (job) => {
+    const { groupID, newPos, userID } = job.data;
     const dateTime = new Date();
     try {
       // Query current group members at execution time
-      const {rows: peripheralRows} = await sharedPgPool.query(
+      const { rows: peripheralRows } = await sharedPgPool.query(
         `SELECT p.id, p.peripheral_number, p.device_id
          FROM peripherals p
          JOIN group_peripherals gp ON p.id = gp.peripheral_id
@@ -210,11 +227,11 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
 
       // Send socket events to each device
       for (const [deviceId, changedPosList] of deviceMap.entries()) {
-        const {rows: deviceRows} = await sharedPgPool.query(
+        const { rows: deviceRows } = await sharedPgPool.query(
           "SELECT socket FROM device_tokens WHERE device_id=$1 AND connected=TRUE",
           [deviceId]
         );
-        
+
         if (deviceRows.length === 1 && deviceRows[0].socket) {
           const posWithoutID = changedPosList.map(pos => {
             const { periphID, ...rest } = pos;
@@ -225,7 +242,7 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
       }
 
       // Notify user app
-      const {rows: userRows} = await sharedPgPool.query(
+      const { rows: userRows } = await sharedPgPool.query(
         "SELECT socket FROM user_tokens WHERE user_id=$1",
         [userID]
       );
@@ -237,25 +254,18 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
         }));
         socketIoInstance.to(userRows[0].socket).emit("posUpdates", posWithoutNumber);
       }
-      
+
     } catch (error) {
       console.error(`Error processing group schedule job:`, error);
       throw error;
     }
   });
 
-  agenda.on('ready', () => console.log('Agenda connected to MongoDB and ready!'));
-  agenda.on('start', (job) => console.log(`Job "${job.attrs.name}" starting`));
-  agenda.on('complete', (job) => console.log(`Job "${job.attrs.name}" complete`));
-  agenda.on('success', (job) => console.log(`Job "${job.attrs.name}" succeeded`));
-  agenda.on('fail', (err, job) => console.error(`Job "${job.attrs.name}" failed: ${err.message}`));
-
-  await agenda.start();
-  console.log('Agenda job processing started.');
-  return agenda;
+  console.log('PgBoss job processing started.');
+  return boss;
 };
 
 module.exports = {
-  agenda,
+  agenda: () => boss, // Export a function that returns boss for compatibility
   initializeAgenda
 };
