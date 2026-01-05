@@ -1,0 +1,32 @@
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          script: |
+            # 1. Go to your app folder (CHANGE THIS PATH to match yours)
+            cd /root/my-blind-app
+
+            # 2. Get latest code
+            git pull origin main
+
+            # 3. Install new dependencies if any
+            npm install --production
+
+            # 4. Restart the app (Assuming you use PM2)
+            pm2 restart all
+            
+            # If you are NOT using PM2 yet, standard node won't work well here.
+            # I highly recommend installing PM2: `npm install -g pm2` on the server.
