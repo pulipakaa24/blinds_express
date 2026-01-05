@@ -1151,9 +1151,8 @@ app.post('/add_group', authenticateToken, async (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Group name is required' });
     }
-    // if (!peripheral_ids || !Array.isArray(peripheral_ids) || peripheral_ids.length < 2) {
 
-    if (!peripheral_ids || !Array.isArray(peripheral_ids)) {
+    if (!peripheral_ids || !Array.isArray(peripheral_ids) || peripheral_ids.length < 2) {
       return res.status(400).json({ error: 'At least 2 peripherals are required' });
     }
 
