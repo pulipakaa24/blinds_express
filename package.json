@@ -19,6 +19,7 @@
     "node-schedule": "^2.1.1",
     "pg": "^8.16.0",
     "pg-format": "^1.0.4",
+    "rate-limiter-flexible": "^9.0.1",
     "socket.io": "^4.8.1"
   }
 }
