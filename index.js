@@ -19,6 +19,12 @@ const httpRateLimiter = new RateLimiterMemory({
   duration: 1, 
 });
 
+// Auth endpoints rate limiter: 10 attempts per hour per IP
+const authRateLimiter = new RateLimiterMemory({
+  points: 10,
+  duration: 3600, // 1 hour in seconds
+});
+
 // WebSocket connection rate limiter: 1 connection per second per IP
 const wsConnectionRateLimiter = new RateLimiterMemory({
   points: 5,
@@ -506,6 +512,18 @@ app.get('/', (req, res) => {
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   console.log('login');
+  
+  // Rate limit login attempts
+  const ip = req.ip || req.connection.remoteAddress;
+  try {
+    await authRateLimiter.consume(ip);
+  } catch (rejRes) {
+    return res.status(429).json({ 
+      error: 'Too many login attempts. Please try again later.',
+      retryAfter: Math.ceil(rejRes.msBeforeNext / 1000 / 60) // minutes
+    });
+  }
+  
   if (!email || !password) return res.status(400).json({error: 'email and password required'});
   try {
     const {rows} = await pool.query('select id, password_hash_string from users where email = $1', [email]);
@@ -528,6 +546,18 @@ app.post('/login', async (req, res) => {
 app.post('/create_user', async (req, res) => {
   console.log("got post req");
   const {name, email, password} = req.body
+  
+  // Rate limit account creation attempts
+  const ip = req.ip || req.connection.remoteAddress;
+  try {
+    await authRateLimiter.consume(ip);
+  } catch (rejRes) {
+    return res.status(429).json({ 
+      error: 'Too many account creation attempts. Please try again later.',
+      retryAfter: Math.ceil(rejRes.msBeforeNext / 1000 / 60) // minutes
+    });
+  }
+  
   try {
     
     const hashedPass = await hash(password);
