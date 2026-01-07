@@ -12,6 +12,8 @@ const format = require('pg-format');
 const cronParser = require('cron-parser');
 const { ObjectId } = require('mongodb');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
+const crypto = require('crypto');
+const { sendVerificationEmail } = require('./mailer'); // Import the function
 
 // HTTP rate limiter: 5 requests per second per IP
 const httpRateLimiter = new RateLimiterMemory({
@@ -23,6 +25,12 @@ const httpRateLimiter = new RateLimiterMemory({
 const authRateLimiter = new RateLimiterMemory({
   points: 10,
   duration: 3600, // 1 hour in seconds
+});
+
+// Resend verification email rate limiter: 1 request per 20 seconds per IP
+const resendVerificationRateLimiter = new RateLimiterMemory({
+  points: 1,
+  duration: 20,
 });
 
 // WebSocket connection rate limiter: 1 connection per second per IP
@@ -526,7 +534,7 @@ app.post('/login', async (req, res) => {
   
   if (!email || !password) return res.status(400).json({error: 'email and password required'});
   try {
-    const {rows} = await pool.query('select id, password_hash_string from users where email = $1', [email]);
+    const {rows} = await pool.query('select id, password_hash_string, is_verified from users where email = $1', [email]);
     if (rows.length === 0) return res.status(401).json({error: 'Invalid Credentials'});
     const user = rows[0]
     console.log('user found');
@@ -534,6 +542,13 @@ app.post('/login', async (req, res) => {
 
     if (!verified) return res.status(401).json({ error: 'Invalid credentials' });
     console.log("password correct");
+
+    if (!user.is_verified) {
+      return res.status(403).json({ 
+        error: 'Email not verified. Please check your email and verify your account before logging in.' 
+      });
+    }
+    
     const token = await createToken(user.id); // token is now tied to ID
 
     res.status(200).json({token});
@@ -558,20 +573,140 @@ app.post('/create_user', async (req, res) => {
     });
   }
   
+  // Compute hash and token once for reuse
+  const hashedPass = await hash(password);
+  const token = crypto.randomBytes(32).toString('hex');
+  
   try {
-    
-    const hashedPass = await hash(password);
-
-    await pool.query("insert into users (name, email, password_hash_string) values (nullif($1, ''), $2, $3)",
-      [name, email,  hashedPass]
+    const newUser = await pool.query(
+      `insert into users (name, email, password_hash_string, verification_token, is_verified)
+      values (nullif($1, ''), $2, $3, $4, false)
+      RETURNING id, email`,
+      [name, email,  hashedPass, token]
     );
-    return res.sendStatus(201);
+
+    await sendVerificationEmail(email, token, name);
+    
+    // Create temporary token for verification checking
+    const tempToken = await createToken(newUser.rows[0].id);
+
+    res.status(201).json({ message: "User registered. Please check your email.", token: tempToken });
   } catch (err) {
     console.error(err);
     if (err.code === '23505') {
+      // Email already exists - check if verified
+      try {
+        const {rows} = await pool.query('SELECT is_verified FROM users WHERE email = $1', [email]);
+        if (rows.length === 1 && !rows[0].is_verified) {
+          // User exists but not verified - replace their record (reuse hashedPass and token)
+          await pool.query(
+            `UPDATE users 
+             SET name = nullif($1, ''), password_hash_string = $2, verification_token = $3
+             WHERE email = $4`,
+            [name, hashedPass, token, email]
+          );
+          
+          await sendVerificationEmail(email, token, name);
+          
+          // Get user ID and create temp token
+          const {rows: userRows} = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+          const tempToken = await createToken(userRows[0].id);
+          
+          return res.status(201).json({ message: "User registered. Please check your email.", token: tempToken });
+        }
+      } catch (updateErr) {
+        console.error('Error updating unverified user:', updateErr);
+      }
+      
+      // User is verified or something went wrong - email is truly in use
       return res.status(409).json({ error: 'Email already in use' });
     }
     return res.sendStatus(500);
+  }
+});
+
+app.get('/verify-email', async (req, res) => {
+  const { token } = req.query;
+
+  if (!token) {
+    return res.status(400).send('Missing token');
+  }
+
+  try {
+    // 1. Find the user with this token
+    const result = await pool.query(
+      `SELECT * FROM users WHERE verification_token = $1`,
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).send('Invalid or expired token.');
+    }
+
+    const user = result.rows[0];
+
+    // 2. Verify them and clear the token
+    // We clear the token so the link cannot be used twice
+    await pool.query(
+      `UPDATE users 
+       SET is_verified = true, verification_token = NULL 
+       WHERE id = $1`,
+      [user.id]
+    );
+
+    // 3. Send them to a success page or back to the app
+    res.send(`
+      <h1>Email Verified!</h1>
+      <p>You can now close this window and log in to the app.</p>
+    `);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server Error');
+  }
+});
+
+app.get('/verification_status', authenticateToken, async (req, res) => {
+  try {
+    const {rows} = await pool.query('SELECT is_verified FROM users WHERE id = $1', [req.user]);
+    if (rows.length === 0) return res.status(404).json({error: 'User not found'});
+    res.status(200).json({is_verified: rows[0].is_verified});
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/resend_verification', authenticateToken, async (req, res) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  try {
+    await resendVerificationRateLimiter.consume(ip);
+  } catch (rejRes) {
+    return res.status(429).json({ 
+      error: 'Please wait before requesting another verification email.',
+      retryAfter: Math.ceil(rejRes.msBeforeNext / 1000) // seconds
+    });
+  }
+
+  try {
+    const {rows} = await pool.query('SELECT email, name, is_verified FROM users WHERE id = $1', [req.user]);
+    if (rows.length === 0) return res.status(404).json({error: 'User not found'});
+    
+    const user = rows[0];
+    
+    if (user.is_verified) {
+      return res.status(400).json({error: 'Email already verified'});
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    await pool.query('UPDATE users SET verification_token = $1 WHERE id = $2', [token, req.user]);
+    
+    await sendVerificationEmail(user.email, token, user.name);
+    
+    res.status(200).json({ message: 'Verification email sent' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1168,8 +1303,8 @@ app.post('/update_schedule', authenticateToken, async (req, res) => {
   }
 });
 
-server.listen(port, () => {
-  console.log(`Example app listening at http://localhost:${port}`);
+server.listen(port, '127.0.0.1', () => {
+  console.log(`Example app listening on 127.0.0.1:${port}`);
 });
 
 app.post('/periph_schedule_list', authenticateToken, async (req, res) => {
