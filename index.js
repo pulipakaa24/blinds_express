@@ -1168,8 +1168,8 @@ app.post('/update_schedule', authenticateToken, async (req, res) => {
   }
 });
 
-server.listen(port, () => {
-  console.log(`Example app listening at http://localhost:${port}`);
+server.listen(port, '127.0.0.1', () => {
+  console.log(`Example app listening on 127.0.0.1:${port}`);
 });
 
 app.post('/periph_schedule_list', authenticateToken, async (req, res) => {
