@@ -225,7 +225,90 @@ async function sendPasswordResetEmail(toEmail, code, name, localHour = new Date(
   }
 }
 
-module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendEmailChangeVerification };
+// Helper function to generate styled HTML response for verification pages
+function generateVerificationPageHTML(title, message, isSuccess = true) {
+  const primaryColor = '#2196F3'; // Blue theme
+  const icon = isSuccess ? '✓' : '✕';
+  const iconBg = isSuccess ? primaryColor : '#f44336';
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <link href="https://fonts.googleapis.com/css2?family=ABeeZee:ital@0;1&display=swap" rel="stylesheet">
+      <title>${title} - BlindMaster</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f5f5f5; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 20px; min-height: 100vh;">
+        <tr>
+          <td align="center">
+            <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); overflow: hidden; max-width: 600px;">
+              
+              <!-- Header with brand color -->
+              <tr>
+                <td align="center" style="background-color: ${primaryColor}; padding: 40px 20px;">
+                  <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 0.5px;">BlindMaster</h1>
+                  <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.95;">Smart Home Automation</p>
+                </td>
+              </tr>
+              
+              <!-- Status Icon -->
+              <tr>
+                <td align="center" style="padding: 50px 40px 30px 40px;">
+                  <div style="width: 80px; height: 80px; border-radius: 50%; background-color: ${iconBg}; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 30px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);">
+                    <span style="color: #ffffff; font-size: 48px; font-weight: bold; line-height: 80px;">${icon}</span>
+                  </div>
+                  <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 28px; font-weight: normal;">
+                    ${title}
+                  </h2>
+                  <p style="margin: 0; color: #666666; font-size: 16px; line-height: 1.6;">
+                    ${message}
+                  </p>
+                </td>
+              </tr>
+              
+              <!-- Divider -->
+              <tr>
+                <td style="padding: 0 40px;">
+                  <div style="border-top: 1px solid #e0e0e0;"></div>
+                </td>
+              </tr>
+              
+              <!-- Footer info -->
+              <tr>
+                <td style="padding: 30px 40px; text-align: center;">
+                  <p style="margin: 0; color: #999999; font-size: 13px; line-height: 1.5;">
+                    You can safely close this window and return to the app.
+                  </p>
+                </td>
+              </tr>
+              
+              <!-- Footer bar -->
+              <tr>
+                <td align="center" style="background-color: #f9f9f9; padding: 25px 40px;">
+                  <p style="margin: 0; color: #999999; font-size: 12px;">
+                    © 2026 BlindMaster. All rights reserved.
+                  </p>
+                </td>
+              </tr>
+              
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+}
+
+module.exports = { 
+  sendVerificationEmail, 
+  sendPasswordResetEmail, 
+  sendEmailChangeVerification,
+  generateVerificationPageHTML 
+};
 
 // Helper function to send email change verification email
 async function sendEmailChangeVerification(newEmail, token, name, oldEmail, localHour = new Date().getHours()) {

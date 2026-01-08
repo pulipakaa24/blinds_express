@@ -13,7 +13,7 @@ const cronParser = require('cron-parser');
 const { ObjectId } = require('mongodb');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
 const crypto = require('crypto');
-const { sendVerificationEmail, sendPasswordResetEmail } = require('./mailer');
+const { sendVerificationEmail, sendPasswordResetEmail, generateVerificationPageHTML } = require('./mailer');
 
 // HTTP rate limiter: 5 requests per second per IP
 const httpRateLimiter = new RateLimiterMemory({
@@ -651,24 +651,36 @@ app.get('/verify-email', async (req, res) => {
   const { token } = req.query;
 
   if (!token) {
-    return res.status(400).send('Missing token');
+    return res.status(400).send(
+      generateVerificationPageHTML(
+        'Missing Token',
+        'The verification link is incomplete. Please check your email and try again.',
+        false
+      )
+    );
   }
 
   try {
-    // 1. Find the user with this token
+    // Check if token exists at all
     const result = await pool.query(
       `SELECT * FROM users WHERE verification_token = $1`,
       [token]
     );
 
     if (result.rows.length === 0) {
-      return res.status(400).send('Invalid or expired token.');
+      // Token not found - check if already verified
+      return res.send(
+        generateVerificationPageHTML(
+          'Already Verified',
+          'This verification link has already been used. Your email is verified and you can log in to the app.',
+          true
+        )
+      );
     }
 
     const user = result.rows[0];
 
-    // 2. Verify them and clear the token
-    // We clear the token so the link cannot be used twice
+    // Verify them and clear the token
     await pool.query(
       `UPDATE users 
        SET is_verified = true, verification_token = NULL 
@@ -679,15 +691,23 @@ app.get('/verify-email', async (req, res) => {
     // Cancel any scheduled deletion job for this user
     await agenda.cancel({ name: 'deleteUnverifiedUser', 'data.userId': user.id });
 
-    // 3. Send them to a success page or back to the app
-    res.send(`
-      <h1>Email Verified!</h1>
-      <p>You can now close this window and log in to the app.</p>
-    `);
+    res.send(
+      generateVerificationPageHTML(
+        'Email Verified!',
+        'Your email has been successfully verified. You can now log in to the app and start using BlindMaster.',
+        true
+      )
+    );
 
   } catch (err) {
     console.error(err);
-    res.status(500).send('Server Error');
+    res.status(500).send(
+      generateVerificationPageHTML(
+        'Server Error',
+        'An unexpected error occurred. Please try again or contact support if the problem persists.',
+        false
+      )
+    );
   }
 });
 
@@ -902,28 +922,58 @@ app.get('/verify-email-change', async (req, res) => {
   const { token } = req.query;
 
   if (!token) {
-    return res.status(400).send('Missing token');
+    return res.status(400).send(
+      generateVerificationPageHTML(
+        'Missing Token',
+        'The verification link is incomplete. Please request a new email change from the app.',
+        false
+      )
+    );
   }
 
   try {
-    // Find the pending email change with this token
-    const result = await pool.query(
-      `SELECT user_id, pending_email FROM user_pending_emails WHERE token = $1 AND expires_at > NOW()`,
+    // First, check if token exists at all (expired or not)
+    const tokenCheck = await pool.query(
+      `SELECT user_id, pending_email, expires_at FROM user_pending_emails WHERE token = $1`,
       [token]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(400).send('Invalid or expired token.');
+    if (tokenCheck.rows.length === 0) {
+      // Token doesn't exist - likely already processed
+      return res.send(
+        generateVerificationPageHTML(
+          'Already Verified',
+          'This verification link has already been used. If your email change was successful, you can log in with your new email address.',
+          true
+        )
+      );
     }
 
-    const { user_id, pending_email } = result.rows[0];
+    const { user_id, pending_email, expires_at } = tokenCheck.rows[0];
+
+    // Check if expired
+    if (new Date(expires_at) <= new Date()) {
+      return res.status(400).send(
+        generateVerificationPageHTML(
+          'Link Expired',
+          'This verification link has expired. Please request a new email change from the app.',
+          false
+        )
+      );
+    }
 
     // Check if new email is now taken (race condition check)
     const {rows: emailCheck} = await pool.query('SELECT id FROM users WHERE email = $1', [pending_email]);
     if (emailCheck.length > 0 && emailCheck[0].id !== user_id) {
       await pool.query('DELETE FROM user_pending_emails WHERE user_id = $1', [user_id]);
       await agenda.cancel({ name: 'deleteUserPendingEmail', 'data.userId': user_id });
-      return res.status(400).send('Email address is no longer available.');
+      return res.status(400).send(
+        generateVerificationPageHTML(
+          'Email Unavailable',
+          'This email address is no longer available. Please try a different email address.',
+          false
+        )
+      );
     }
 
     // Update the user's email
@@ -938,14 +988,23 @@ app.get('/verify-email-change', async (req, res) => {
     // Cancel the scheduled deletion job
     await agenda.cancel({ name: 'deleteUserPendingEmail', 'data.userId': user_id });
 
-    res.send(`
-      <h1>Email Changed Successfully!</h1>
-      <p>Your email has been updated. You can now close this window.</p>
-    `);
+    res.send(
+      generateVerificationPageHTML(
+        'Email Changed Successfully!',
+        'Your email has been updated successfully. You can now log in to the app with your new email address.',
+        true
+      )
+    );
 
   } catch (err) {
     console.error(err);
-    res.status(500).send('Internal server error');
+    res.status(500).send(
+      generateVerificationPageHTML(
+        'Server Error',
+        'An unexpected error occurred. Please try again or contact support if the problem persists.',
+        false
+      )
+    );
   }
 });
 
