@@ -1,5 +1,5 @@
 const nodemailer = require('nodemailer');
-const { SESClient, SendRawEmailCommand } = require('@aws-sdk/client-ses');
+const { SESClient, SendRawEmailCommand } = require('@aws-sdk/client-sesv2');
 
 const ses = new SESClient({
   region: process.env.AWS_REGION,
