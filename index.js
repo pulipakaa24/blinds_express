@@ -13,7 +13,7 @@ const cronParser = require('cron-parser');
 const { ObjectId } = require('mongodb');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
 const crypto = require('crypto');
-const { sendVerificationEmail } = require('./mailer'); // Import the function
+const { sendVerificationEmail, sendPasswordResetEmail } = require('./mailer');
 
 // HTTP rate limiter: 5 requests per second per IP
 const httpRateLimiter = new RateLimiterMemory({
@@ -31,6 +31,12 @@ const authRateLimiter = new RateLimiterMemory({
 const resendVerificationRateLimiter = new RateLimiterMemory({
   points: 1,
   duration: 20,
+});
+
+// Password reset rate limiter: 10 attempts per 15 minutes per IP
+const passwordResetRateLimiter = new RateLimiterMemory({
+  points: 10,
+  duration: 900, // 15 minutes in seconds
 });
 
 // WebSocket connection rate limiter: 1 connection per second per IP
@@ -72,13 +78,16 @@ let agenda;
 (async () => {
     // 1. Connect to MongoDB
     await connectDB();
-    
     agenda = await initializeAgenda('mongodb://localhost:27017/myScheduledApp', pool, io);
 })();
 
 (async () => {
   await pool.query("update user_tokens set connected=FALSE where connected=TRUE");
   await pool.query("update device_tokens set connected=FALSE where connected=TRUE");
+  
+  // Clear all expired password reset tokens on startup
+  await pool.query("DELETE FROM password_reset_tokens WHERE expires_at < NOW()");
+  console.log("Cleared expired password reset tokens");
 })();
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '5d';
@@ -796,6 +805,190 @@ app.post('/change_password', authenticateToken, async (req, res) => {
     );
 
     res.status(200).json({ message: 'Password changed successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Helper function to generate 6-character alphanumeric code
+function generateResetCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude confusing chars like 0, O, 1, I
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(crypto.randomInt(chars.length));
+  }
+  return code;
+}
+
+app.post('/forgot-password', async (req, res) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  try {
+    await resendVerificationRateLimiter.consume(ip);
+  } catch (rejRes) {
+    return res.status(429).json({ 
+      error: 'Please wait before requesting another code.',
+      retryAfter: Math.ceil(rejRes.msBeforeNext / 1000), // seconds
+      remainingAttempts: 0
+    });
+  }
+
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    // Check if user exists
+    const {rows} = await pool.query('SELECT id, name FROM users WHERE email = $1', [email]);
+    
+    // Always return success to prevent email enumeration
+    if (rows.length === 0) {
+      return res.status(200).json({ message: 'If an account exists, a reset code has been sent' });
+    }
+
+    const user = rows[0];
+    const code = generateResetCode();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    // Insert or update token with ON CONFLICT
+    await pool.query(
+      `INSERT INTO password_reset_tokens (email, token, expires_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (email) 
+       DO UPDATE SET token = $2, expires_at = $3, created_at = CURRENT_TIMESTAMP`,
+      [email, code, expiresAt]
+    );
+
+    // Cancel any existing job for this email
+    await agenda.cancel({ name: 'deletePasswordResetToken', 'data.email': email });
+
+    // Schedule job to delete token after 15 minutes
+    await agenda.schedule(expiresAt, 'deletePasswordResetToken', { email });
+
+    // Send email
+    await sendPasswordResetEmail(email, code, user.name);
+
+    res.status(200).json({ message: 'If an account exists, a reset code has been sent' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/verify-reset-code', async (req, res) => {
+  const { email, code } = req.body;
+
+  if (!email || !code) {
+    return res.status(400).json({ error: 'Email and code are required' });
+  }
+
+  // Rate limit verification attempts
+  const ip = req.ip || req.connection.remoteAddress;
+  try {
+    const rateLimiterRes = await passwordResetRateLimiter.consume(ip);
+    // Store remaining attempts for later use
+    res.locals.remainingAttempts = rateLimiterRes.remainingPoints;
+  } catch (rejRes) {
+    return res.status(429).json({ 
+      error: 'Too many verification attempts. Please try again later.',
+      retryAfter: Math.ceil(rejRes.msBeforeNext / 1000 / 60), // minutes
+      remainingAttempts: 0
+    });
+  }
+
+  try {
+    const {rows} = await pool.query(
+      'SELECT token, expires_at FROM password_reset_tokens WHERE email = $1',
+      [email]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid or expired code' });
+    }
+
+    const resetToken = rows[0];
+
+    if (new Date() > new Date(resetToken.expires_at)) {
+      await pool.query('DELETE FROM password_reset_tokens WHERE email = $1', [email]);
+      return res.status(401).json({ error: 'Code has expired' });
+    }
+
+    if (resetToken.token !== code.toUpperCase()) {
+      return res.status(401).json({ 
+        error: 'Invalid code',
+        remainingAttempts: res.locals.remainingAttempts || 0
+      });
+    }
+
+    res.status(200).json({ message: 'Code verified' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ error: 'Email, code, and new password are required' });
+  }
+
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+
+  // Rate limit password reset attempts
+  const ip = req.ip || req.connection.remoteAddress;
+  try {
+    await passwordResetRateLimiter.consume(ip);
+  } catch (rejRes) {
+    return res.status(429).json({ 
+      error: 'Too many password reset attempts. Please try again later.',
+      retryAfter: Math.ceil(rejRes.msBeforeNext / 1000 / 60), // minutes
+      remainingAttempts: 0
+    });
+  }
+
+  try {
+    const {rows} = await pool.query(
+      'SELECT token, expires_at FROM password_reset_tokens WHERE email = $1',
+      [email]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid or expired code' });
+    }
+
+    const resetToken = rows[0];
+
+    if (new Date() > new Date(resetToken.expires_at)) {
+      await pool.query('DELETE FROM password_reset_tokens WHERE email = $1', [email]);
+      return res.status(401).json({ error: 'Code has expired' });
+    }
+
+    if (resetToken.token !== code.toUpperCase()) {
+      return res.status(401).json({ error: 'Invalid code' });
+    }
+
+    // Hash new password
+    const hashedPassword = await hash(newPassword);
+
+    // Update password
+    await pool.query(
+      'UPDATE users SET password_hash_string = $1 WHERE email = $2',
+      [hashedPassword, email]
+    );
+
+    // Delete the used token
+    await pool.query('DELETE FROM password_reset_tokens WHERE email = $1', [email]);
+
+    // Cancel scheduled deletion job
+    await agenda.cancel({ name: 'deletePasswordResetToken', 'data.email': email });
+
+    res.status(200).json({ message: 'Password reset successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });

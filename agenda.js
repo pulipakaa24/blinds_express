@@ -256,6 +256,21 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
       console.error("Error cleaning up users:", error);
     }
   });
+    
+  // Define the password reset token deletion job
+  agenda.define('deletePasswordResetToken', async (job) => {
+    const { email } = job.attrs.data;
+    try {
+      const result = await pool.query('DELETE FROM password_reset_tokens WHERE email = $1', [email]);
+      if (result.rowCount > 0) {
+        console.log(`Deleted expired password reset token for ${email}`);
+      }
+    } catch (error) {
+      console.error(`Error deleting password reset token for ${email}:`, error);
+    }
+  });
+  
+  await agenda.start();
 
   agenda.on('ready', () => console.log('Agenda connected to MongoDB and ready!'));
   agenda.on('start', (job) => console.log(`Job "${job.attrs.name}" starting`));
