@@ -56,18 +56,18 @@ async function sendVerificationEmail(toEmail, token, name, localHour = new Date(
                   <!-- Header with brand color -->
                   <tr>
                     <td align="center" style="background-color: ${primaryColor}; padding: 40px 20px;">
-                      <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 0.5px;">BlindMaster</h1>
-                      <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.95;">Smart Home Automation</p>
+                      <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 0.5px; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">BlindMaster</h1>
+                      <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.95; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">Smart Home Automation</p>
                     </td>
                   </tr>
                   
                   <!-- Welcome message -->
                   <tr>
                     <td style="padding: 50px 40px 30px 40px; text-align: center;">
-                      <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 28px; font-weight: normal;">
-                        Welcome${name && name.trim() ? `, <span style="color: ${primaryColor};">${name.trim()}</span>` : ''}!
+                      <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 28px; font-weight: normal; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+                        Welcome${name && name.trim() ? `, <span style="color: ${primaryColor}; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">${name.trim()}</span>` : ''}!
                       </h2>
-                      <p style="margin: 0 0 30px 0; color: #666666; font-size: 16px; line-height: 1.6;">
+                      <p style="margin: 0 0 30px 0; color: #666666; font-size: 16px; line-height: 1.6; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         Thank you for joining BlindMaster! To electrify your blinds, please verify your email address 🥹
                       </p>
                     </td>
@@ -77,7 +77,7 @@ async function sendVerificationEmail(toEmail, token, name, localHour = new Date(
                   <tr>
                     <td align="center" style="padding: 0 40px 40px 40px;">
                       <a href="${verificationLink}" 
-                         style="display: inline-block; padding: 16px 48px; background-color: ${primaryColor}; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); transition: all 0.3s ease;">
+                         style="display: inline-block; padding: 16px 48px; background-color: ${primaryColor}; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); transition: all 0.3s ease; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         Verify Email Address
                       </a>
                     </td>
@@ -93,10 +93,10 @@ async function sendVerificationEmail(toEmail, token, name, localHour = new Date(
                   <!-- Footer info -->
                   <tr>
                     <td style="padding: 30px 40px; text-align: center;">
-                      <p style="margin: 0 0 10px 0; color: #999999; font-size: 13px; line-height: 1.5;">
+                      <p style="margin: 0 0 10px 0; color: #999999; font-size: 13px; line-height: 1.5; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         This verification link will expire in <strong style="color: #666666;">24 hours</strong>.
                       </p>
-                      <p style="margin: 0; color: #999999; font-size: 13px; line-height: 1.5;">
+                      <p style="margin: 0; color: #999999; font-size: 13px; line-height: 1.5; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         If you didn't create a BlindMaster account, please ignore this email!!!
                       </p>
                     </td>
@@ -105,7 +105,7 @@ async function sendVerificationEmail(toEmail, token, name, localHour = new Date(
                   <!-- Footer bar -->
                   <tr>
                     <td align="center" style="background-color: #f9f9f9; padding: 25px 40px;">
-                      <p style="margin: 0; color: #999999; font-size: 12px;">
+                      <p style="margin: 0; color: #999999; font-size: 12px; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         © 2026 BlindMaster. All rights reserved.
                       </p>
                     </td>
@@ -153,18 +153,18 @@ async function sendPasswordResetEmail(toEmail, code, name, localHour = new Date(
                   <!-- Header with brand color -->
                   <tr>
                     <td align="center" style="background-color: ${primaryColor}; padding: 40px 20px;">
-                      <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 0.5px;">BlindMaster</h1>
-                      <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.95;">Smart Home Automation</p>
+                      <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 0.5px; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">BlindMaster</h1>
+                      <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.95; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">Smart Home Automation</p>
                     </td>
                   </tr>
                   
                   <!-- Message -->
                   <tr>
                     <td style="padding: 50px 40px 30px 40px; text-align: center;">
-                      <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 28px; font-weight: normal;">
+                      <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 28px; font-weight: normal; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         Password Reset Request
                       </h2>
-                      <p style="margin: 0 0 30px 0; color: #666666; font-size: 16px; line-height: 1.6;">
+                      <p style="margin: 0 0 30px 0; color: #666666; font-size: 16px; line-height: 1.6; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         ${name && name.trim() ? `Hi ${name.trim()}, we` : 'We'} received a request to reset your password. Use the code below to continue:
                       </p>
                     </td>
@@ -191,10 +191,10 @@ async function sendPasswordResetEmail(toEmail, code, name, localHour = new Date(
                   <!-- Footer info -->
                   <tr>
                     <td style="padding: 30px 40px; text-align: center;">
-                      <p style="margin: 0 0 10px 0; color: #999999; font-size: 13px; line-height: 1.5;">
+                      <p style="margin: 0 0 10px 0; color: #999999; font-size: 13px; line-height: 1.5; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         This code will expire in <strong style="color: #666666;">15 minutes</strong>.
                       </p>
-                      <p style="margin: 0; color: #999999; font-size: 13px; line-height: 1.5;">
+                      <p style="margin: 0; color: #999999; font-size: 13px; line-height: 1.5; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         If you didn't request a password reset, please ignore this email.
                       </p>
                     </td>
@@ -203,7 +203,7 @@ async function sendPasswordResetEmail(toEmail, code, name, localHour = new Date(
                   <!-- Footer bar -->
                   <tr>
                     <td align="center" style="background-color: #f9f9f9; padding: 25px 40px;">
-                      <p style="margin: 0; color: #999999; font-size: 12px;">
+                      <p style="margin: 0; color: #999999; font-size: 12px; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
                         © 2026 BlindMaster. All rights reserved.
                       </p>
                     </td>
