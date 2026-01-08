@@ -671,8 +671,8 @@ app.get('/verify-email', async (req, res) => {
       // Token not found - check if already verified
       return res.send(
         generateVerificationPageHTML(
-          'Already Verified',
-          'This verification link has already been used. Your email is verified and you can log in to the app.',
+          'Already Verified or Expired',
+          'This verification link has already been used, or the link has expired. Check your app for updated status.',
           true
         )
       );
@@ -942,8 +942,8 @@ app.get('/verify-email-change', async (req, res) => {
       // Token doesn't exist - likely already processed
       return res.send(
         generateVerificationPageHTML(
-          'Already Verified',
-          'This verification link has already been used. If your email change was successful, you can log in with your new email address.',
+          'Already Verified or Expired',
+          'This verification link has already been used, or the link has expired. Check your app for updated status.',
           true
         )
       );
