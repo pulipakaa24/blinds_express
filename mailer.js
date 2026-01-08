@@ -55,7 +55,7 @@ async function sendVerificationEmail(toEmail, token, name, localHour = new Date(
                   
                   <!-- Header with brand color -->
                   <tr>
-                    <td align="center" style="background: ${colors.gradient}; padding: 40px 20px;">
+                    <td align="center" style="background-color: ${primaryColor}; padding: 40px 20px;">
                       <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 0.5px;">BlindMaster</h1>
                       <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.95;">Smart Home Automation</p>
                     </td>
@@ -152,7 +152,7 @@ async function sendPasswordResetEmail(toEmail, code, name, localHour = new Date(
                   
                   <!-- Header with brand color -->
                   <tr>
-                    <td align="center" style="background: ${colors.gradient}; padding: 40px 20px;">
+                    <td align="center" style="background-color: ${primaryColor}; padding: 40px 20px;">
                       <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 0.5px;">BlindMaster</h1>
                       <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.95;">Smart Home Automation</p>
                     </td>
