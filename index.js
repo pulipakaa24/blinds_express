@@ -731,6 +731,26 @@ app.post('/logout', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/account_info', authenticateToken, async (req, res) => {
+  try {
+    const {rows} = await pool.query(
+      'SELECT name, email, created_at FROM users WHERE id = $1',
+      [req.user]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.status(200).json({
+      name: rows[0].name,
+      email: rows[0].email,
+      created_at: rows[0].created_at
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/device_list', authenticateToken, async (req, res) => {
   try {
     console.log("device List request");
