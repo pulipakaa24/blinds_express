@@ -833,7 +833,7 @@ app.post('/forgot-password', async (req, res) => {
     });
   }
 
-  const { email } = req.body;
+  const { email, localHour } = req.body;
 
   if (!email) {
     return res.status(400).json({ error: 'Email is required' });
@@ -868,7 +868,7 @@ app.post('/forgot-password', async (req, res) => {
     await agenda.schedule(expiresAt, 'deletePasswordResetToken', { email });
 
     // Send email
-    await sendPasswordResetEmail(email, code, user.name);
+    await sendPasswordResetEmail(email, code, user.name, localHour);
 
     res.status(200).json({ message: 'If an account exists, a reset code has been sent' });
   } catch (err) {

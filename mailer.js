@@ -15,36 +15,23 @@ const transporter = nodemailer.createTransport({
 });
 
 // Helper function to get color based on time of day
-function getColorForTime() {
-  const hour = new Date().getHours();
-  
+// hour parameter should be the local hour (0-23) from the client
+function getColorForTime(hour) {
   if (hour >= 5 && hour < 10) {
     // Morning - orange
-    return {
-      primary: '#FF9800',
-      gradient: 'linear-gradient(135deg, #FF9800 0%, #F57C00 100%)',
-      shadow: 'rgba(255, 152, 0, 0.3)'
-    };
+    return '#FF9800';
   } else if (hour >= 10 && hour < 18) {
     // Afternoon - blue
-    return {
-      primary: '#2196F3',
-      gradient: 'linear-gradient(135deg, #2196F3 0%, #005CA8 100%)',
-      shadow: 'rgba(33, 150, 243, 0.3)'
-    };
+    return '#2196F3';
   } else {
     // Evening/Night - purple
-    return {
-      primary: '#471189',
-      gradient: 'linear-gradient(135deg, #BA82FF 0%, #280059 100%)',
-      shadow: 'rgba(71, 17, 137, 0.3)'
-    };
+    return '#471189';
   }
 }
 
 // Helper function to send email
-async function sendVerificationEmail(toEmail, token, name) {
-  const colors = getColorForTime();
+async function sendVerificationEmail(toEmail, token, name, localHour = new Date().getHours()) {
+  const primaryColor = getColorForTime(localHour);
   const verificationLink = `https://wahwa.com/verify-email?token=${token}`;
 
   try {
@@ -78,7 +65,7 @@ async function sendVerificationEmail(toEmail, token, name) {
                   <tr>
                     <td style="padding: 50px 40px 30px 40px; text-align: center;">
                       <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 28px; font-weight: normal;">
-                        Welcome${name && name.trim() ? `, <span style="color: ${colors.primary};">${name.trim()}</span>` : ''}!
+                        Welcome${name && name.trim() ? `, <span style="color: ${primaryColor};">${name.trim()}</span>` : ''}!
                       </h2>
                       <p style="margin: 0 0 30px 0; color: #666666; font-size: 16px; line-height: 1.6;">
                         Thank you for joining BlindMaster! To electrify your blinds, please verify your email address 🥹
@@ -90,7 +77,7 @@ async function sendVerificationEmail(toEmail, token, name) {
                   <tr>
                     <td align="center" style="padding: 0 40px 40px 40px;">
                       <a href="${verificationLink}" 
-                         style="display: inline-block; padding: 16px 48px; background: ${colors.gradient}; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 12px ${colors.shadow}; transition: all 0.3s ease;">
+                         style="display: inline-block; padding: 16px 48px; background-color: ${primaryColor}; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); transition: all 0.3s ease;">
                         Verify Email Address
                       </a>
                     </td>
@@ -141,8 +128,8 @@ async function sendVerificationEmail(toEmail, token, name) {
 }
 
 // Helper function to send password reset email
-async function sendPasswordResetEmail(toEmail, code, name) {
-  const colors = getColorForTime();
+async function sendPasswordResetEmail(toEmail, code, name, localHour = new Date().getHours()) {
+  const primaryColor = getColorForTime(localHour);
   
   try {
     const info = await transporter.sendMail({
@@ -186,8 +173,8 @@ async function sendPasswordResetEmail(toEmail, code, name) {
                   <!-- Code Display -->
                   <tr>
                     <td align="center" style="padding: 0 40px 40px 40px;">
-                      <div style="display: inline-block; padding: 20px 40px; background-color: #f9f9f9; border-radius: 8px; border: 2px solid ${colors.primary};">
-                        <p style="margin: 0; color: ${colors.primary}; font-size: 36px; font-weight: bold; letter-spacing: 8px; font-family: 'Courier New', monospace;">
+                      <div style="display: inline-block; padding: 20px 40px; background-color: #f9f9f9; border-radius: 8px; border: 2px solid ${primaryColor};">
+                        <p style="margin: 0; color: ${primaryColor}; font-size: 36px; font-weight: bold; letter-spacing: 8px; font-family: 'Courier New', monospace;">
                           ${code}
                         </p>
                       </div>
