@@ -88,6 +88,10 @@ let agenda;
   // Clear all expired password reset tokens on startup
   await pool.query("DELETE FROM password_reset_tokens WHERE expires_at < NOW()");
   console.log("Cleared expired password reset tokens");
+  
+  // Clear all expired pending email changes on startup
+  await pool.query("DELETE FROM user_pending_emails WHERE expires_at < NOW()");
+  console.log("Cleared expired pending email changes");
 })();
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '5d';
@@ -599,6 +603,10 @@ app.post('/create_user', async (req, res) => {
       [name, email,  hashedPass, token]
     );
 
+    // Schedule deletion of unverified user after 15 minutes
+    const expiryTime = new Date(Date.now() + 15 * 60 * 1000);
+    await agenda.schedule(expiryTime, 'deleteUnverifiedUser', { userId: newUser.rows[0].id });
+
     await sendVerificationEmail(email, token, name);
     
     // Create temporary token for verification checking
@@ -668,6 +676,9 @@ app.get('/verify-email', async (req, res) => {
       [user.id]
     );
 
+    // Cancel any scheduled deletion job for this user
+    await agenda.cancel({ name: 'deleteUnverifiedUser', 'data.userId': user.id });
+
     // 3. Send them to a success page or back to the app
     res.send(`
       <h1>Email Verified!</h1>
@@ -703,6 +714,7 @@ app.post('/resend_verification', authenticateToken, async (req, res) => {
   }
 
   try {
+    const { localHour } = req.body;
     const {rows} = await pool.query('SELECT email, name, is_verified FROM users WHERE id = $1', [req.user]);
     if (rows.length === 0) return res.status(404).json({error: 'User not found'});
     
@@ -715,7 +727,7 @@ app.post('/resend_verification', authenticateToken, async (req, res) => {
     const token = crypto.randomBytes(32).toString('hex');
     await pool.query('UPDATE users SET verification_token = $1 WHERE id = $2', [token, req.user]);
     
-    await sendVerificationEmail(user.email, token, user.name);
+    await sendVerificationEmail(user.email, token, user.name, localHour);
     
     res.status(200).json({ message: 'Verification email sent' });
   } catch (err) {
@@ -805,6 +817,134 @@ app.post('/change_password', authenticateToken, async (req, res) => {
     );
 
     res.status(200).json({ message: 'Password changed successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/request-email-change', authenticateToken, async (req, res) => {
+  const { newEmail, localHour } = req.body;
+
+  if (!newEmail) {
+    return res.status(400).json({ error: 'New email is required' });
+  }
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(newEmail)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+
+  try {
+    // Check if new email is already in use
+    const {rows: emailCheck} = await pool.query('SELECT id FROM users WHERE email = $1', [newEmail]);
+    if (emailCheck.length > 0) {
+      return res.status(409).json({ error: 'Email already in use' });
+    }
+
+    // Get user info
+    const {rows: userRows} = await pool.query('SELECT name, email FROM users WHERE id = $1', [req.user]);
+    if (userRows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userRows[0];
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    // Insert or update pending email with ON CONFLICT
+    await pool.query(
+      `INSERT INTO user_pending_emails (user_id, pending_email, token, expires_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id) 
+       DO UPDATE SET pending_email = $2, token = $3, expires_at = $4`,
+      [req.user, newEmail, token, expiresAt]
+    );
+
+    // Cancel any existing job for this user
+    await agenda.cancel({ name: 'deleteUserPendingEmail', 'data.userId': req.user });
+
+    // Schedule job to delete pending email after 15 minutes
+    await agenda.schedule(expiresAt, 'deleteUserPendingEmail', { userId: req.user });
+
+    // Send verification email
+    const { sendEmailChangeVerification } = require('./mailer');
+    await sendEmailChangeVerification(newEmail, token, user.name, user.email, localHour);
+
+    res.status(200).json({ message: 'Verification email sent to new address' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/verify-email-change', async (req, res) => {
+  const { token } = req.query;
+
+  if (!token) {
+    return res.status(400).send('Missing token');
+  }
+
+  try {
+    // Find the pending email change with this token
+    const result = await pool.query(
+      `SELECT user_id, pending_email FROM user_pending_emails WHERE token = $1 AND expires_at > NOW()`,
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).send('Invalid or expired token.');
+    }
+
+    const { user_id, pending_email } = result.rows[0];
+
+    // Check if new email is now taken (race condition check)
+    const {rows: emailCheck} = await pool.query('SELECT id FROM users WHERE email = $1', [pending_email]);
+    if (emailCheck.length > 0 && emailCheck[0].id !== user_id) {
+      await pool.query('DELETE FROM user_pending_emails WHERE user_id = $1', [user_id]);
+      await agenda.cancel({ name: 'deleteUserPendingEmail', 'data.userId': user_id });
+      return res.status(400).send('Email address is no longer available.');
+    }
+
+    // Update the user's email
+    await pool.query(
+      `UPDATE users SET email = $1 WHERE id = $2`,
+      [pending_email, user_id]
+    );
+
+    // Delete the pending email record
+    await pool.query('DELETE FROM user_pending_emails WHERE user_id = $1', [user_id]);
+
+    // Cancel the scheduled deletion job
+    await agenda.cancel({ name: 'deleteUserPendingEmail', 'data.userId': user_id });
+
+    res.send(`
+      <h1>Email Changed Successfully!</h1>
+      <p>Your email has been updated. You can now close this window.</p>
+    `);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Internal server error');
+  }
+});
+
+app.get('/pending-email-status', authenticateToken, async (req, res) => {
+  try {
+    const {rows} = await pool.query(
+      'SELECT pending_email FROM user_pending_emails WHERE user_id = $1',
+      [req.user]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(200).json({ hasPending: false });
+    }
+    
+    res.status(200).json({ 
+      hasPending: true, 
+      pendingEmail: rows[0].pending_email 
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });

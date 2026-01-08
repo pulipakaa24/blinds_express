@@ -244,16 +244,18 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
     }
   });
 
-  agenda.define('delete unverified users', async (job) => {
+  agenda.define('deleteUnverifiedUser', async (job) => {
+    const { userId } = job.attrs.data;
     try {
       const result = await sharedPgPool.query(
-        "DELETE FROM users WHERE is_verified = false AND created_at < NOW() - INTERVAL '24 hours'"
+        "DELETE FROM users WHERE id = $1 AND is_verified = false",
+        [userId]
       );
       if (result.rowCount > 0) {
-        console.log(`Cleanup: Deleted ${result.rowCount} unverified users.`);
+        console.log(`Deleted unverified user with ID ${userId}`);
       }
     } catch (error) {
-      console.error("Error cleaning up users:", error);
+      console.error(`Error deleting unverified user ${userId}:`, error);
     }
   });
     
@@ -269,6 +271,19 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
       console.error(`Error deleting password reset token for ${email}:`, error);
     }
   });
+
+  // Define the user pending email deletion job
+  agenda.define('deleteUserPendingEmail', async (job) => {
+    const { userId } = job.attrs.data;
+    try {
+      const result = await sharedPgPool.query('DELETE FROM user_pending_emails WHERE user_id = $1', [userId]);
+      if (result.rowCount > 0) {
+        console.log(`Deleted expired pending email change for user ${userId}`);
+      }
+    } catch (error) {
+      console.error(`Error deleting pending email for user ${userId}:`, error);
+    }
+  });
   
   await agenda.start();
 
@@ -279,8 +294,6 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
   agenda.on('fail', (err, job) => console.error(`Job "${job.attrs.name}" failed: ${err.message}`));
 
   await agenda.start();
-  await agenda.cancel({ name: 'delete unverified users' });
-  await agenda.every('24 hours', 'delete unverified users');
   console.log('Agenda job processing started.');
   return agenda;
 };
