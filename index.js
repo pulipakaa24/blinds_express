@@ -823,6 +823,25 @@ app.post('/change_password', authenticateToken, async (req, res) => {
   }
 });
 
+app.delete('/delete_account', authenticateToken, async (req, res) => {
+  try {
+    // Delete the user - CASCADE DELETE will handle related records
+    const result = await pool.query(
+      'DELETE FROM users WHERE id = $1',
+      [req.user]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.status(200).json({ message: 'Account deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.post('/request-email-change', authenticateToken, async (req, res) => {
   const { newEmail, localHour } = req.body;
 
