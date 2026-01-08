@@ -1,7 +1,7 @@
 const nodemailer = require('nodemailer');
-const { SESClient, SendRawEmailCommand } = require('@aws-sdk/client-sesv2');
+const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 
-const ses = new SESClient({
+const ses = new SESv2Client({
   region: process.env.AWS_REGION,
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -11,7 +11,7 @@ const ses = new SESClient({
 
 // Create the transporter
 const transporter = nodemailer.createTransport({
-  SES: { ses, aws: { SendRawEmailCommand } },
+  SES: { ses, aws: { SendEmailCommand } },
 });
 
 // Helper function to send email
