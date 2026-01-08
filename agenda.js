@@ -244,6 +244,19 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
     }
   });
 
+  agenda.define('delete unverified users', async (job) => {
+    try {
+      const result = await sharedPgPool.query(
+        "DELETE FROM users WHERE is_verified = false AND created_at < NOW() - INTERVAL '24 hours'"
+      );
+      if (result.rowCount > 0) {
+        console.log(`Cleanup: Deleted ${result.rowCount} unverified users.`);
+      }
+    } catch (error) {
+      console.error("Error cleaning up users:", error);
+    }
+  });
+
   agenda.on('ready', () => console.log('Agenda connected to MongoDB and ready!'));
   agenda.on('start', (job) => console.log(`Job "${job.attrs.name}" starting`));
   agenda.on('complete', (job) => console.log(`Job "${job.attrs.name}" complete`));
@@ -251,6 +264,8 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
   agenda.on('fail', (err, job) => console.error(`Job "${job.attrs.name}" failed: ${err.message}`));
 
   await agenda.start();
+  await agenda.cancel({ name: 'delete unverified users' });
+  await agenda.every('24 hours', 'delete unverified users');
   console.log('Agenda job processing started.');
   return agenda;
 };
