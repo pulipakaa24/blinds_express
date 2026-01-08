@@ -573,6 +573,11 @@ app.post('/create_user', async (req, res) => {
     });
   }
   
+  // Validate password length
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+  
   // Compute hash and token once for reuse
   const hashedPass = await hash(password);
   const token = crypto.randomBytes(32).toString('hex');
@@ -745,6 +750,52 @@ app.get('/account_info', authenticateToken, async (req, res) => {
       email: rows[0].email,
       created_at: rows[0].created_at
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/change_password', authenticateToken, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+
+    // Validate that both passwords are provided
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ error: 'Old password and new password are required' });
+    }
+
+    // Validate new password length
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+
+    // Get current password hash from database
+    const {rows} = await pool.query(
+      'SELECT password_hash_string FROM users WHERE id = $1',
+      [req.user]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Verify old password
+    const verified = await verify(rows[0].password_hash_string, oldPassword);
+    if (!verified) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    // Hash the new password
+    const hashedNewPassword = await hash(newPassword);
+
+    // Update password in database
+    await pool.query(
+      'UPDATE users SET password_hash_string = $1 WHERE id = $2',
+      [hashedNewPassword, req.user]
+    );
+
+    res.status(200).json({ message: 'Password changed successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });

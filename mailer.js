@@ -24,12 +24,83 @@ async function sendVerificationEmail(toEmail, token, name) {
       to: toEmail,
       subject: "Verify your BlindMaster account",
       html: `
-        <div style="font-family: sans-serif; padding: 20px;">
-          <h2>Welcome${name && name.trim() ? `, ${name.trim()}` : ''}!</h2>
-          <p>Please verify your email address to complete your registration.</p>
-          <a href="${verificationLink}" style="padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px;">Verify Email</a>
-          <p style="margin-top: 20px; font-size: 12px; color: #888;">Link expires in 24 hours.</p>
-        </div>
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <link href="https://fonts.googleapis.com/css2?family=ABeeZee:ital@0;1&display=swap" rel="stylesheet">
+        </head>
+        <body style="margin: 0; padding: 0; background-color: #f5f5f5; font-family: 'ABeeZee', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 0;">
+            <tr>
+              <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); overflow: hidden; max-width: 600px;">
+                  
+                  <!-- Header with brand color -->
+                  <tr>
+                    <td align="center" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); padding: 40px 20px;">
+                      <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: bold; letter-spacing: 0.5px;">BlindMaster</h1>
+                      <p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.95;">Smart Home Automation</p>
+                    </td>
+                  </tr>
+                  
+                  <!-- Welcome message -->
+                  <tr>
+                    <td style="padding: 50px 40px 30px 40px; text-align: center;">
+                      <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 28px; font-weight: normal;">
+                        Welcome${name && name.trim() ? `, <span style="color: #FF9800;">${name.trim()}</span>` : ''}!
+                      </h2>
+                      <p style="margin: 0 0 30px 0; color: #666666; font-size: 16px; line-height: 1.6;">
+                        Thank you for joining BlindMaster! To electrify your blinds, please verify your email address 🥹
+                      </p>
+                    </td>
+                  </tr>
+                  
+                  <!-- CTA Button -->
+                  <tr>
+                    <td align="center" style="padding: 0 40px 40px 40px;">
+                      <a href="${verificationLink}" 
+                         style="display: inline-block; padding: 16px 48px; background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3); transition: all 0.3s ease;">
+                        Verify Email Address
+                      </a>
+                    </td>
+                  </tr>
+                  
+                  <!-- Divider -->
+                  <tr>
+                    <td style="padding: 0 40px;">
+                      <div style="border-top: 1px solid #e0e0e0;"></div>
+                    </td>
+                  </tr>
+                  
+                  <!-- Footer info -->
+                  <tr>
+                    <td style="padding: 30px 40px; text-align: center;">
+                      <p style="margin: 0 0 10px 0; color: #999999; font-size: 13px; line-height: 1.5;">
+                        This verification link will expire in <strong style="color: #666666;">24 hours</strong>.
+                      </p>
+                      <p style="margin: 0; color: #999999; font-size: 13px; line-height: 1.5;">
+                        If you didn't create a BlindMaster account, please ignore this email!!!
+                      </p>
+                    </td>
+                  </tr>
+                  
+                  <!-- Footer bar -->
+                  <tr>
+                    <td align="center" style="background-color: #f9f9f9; padding: 25px 40px;">
+                      <p style="margin: 0; color: #999999; font-size: 12px;">
+                        © 2026 BlindMaster. All rights reserved.
+                      </p>
+                    </td>
+                  </tr>
+                  
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
       `,
     });
     console.log("Email sent successfully:", info.messageId);
