@@ -720,6 +720,17 @@ app.get('/verify', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    // Delete all tokens for this user
+    await pool.query("DELETE FROM user_tokens WHERE user_id=$1", [req.user]);
+    res.status(200).json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Error during logout:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/device_list', authenticateToken, async (req, res) => {
   try {
     console.log("device List request");
