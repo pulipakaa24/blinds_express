@@ -863,7 +863,11 @@ app.delete('/delete_account', authenticateToken, async (req, res) => {
 });
 
 app.post('/request-email-change', authenticateToken, async (req, res) => {
-  const { newEmail, localHour } = req.body;
+  const { password, newEmail, localHour } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ error: 'Password is required' });
+  }
 
   if (!newEmail) {
     return res.status(400).json({ error: 'New email is required' });
@@ -876,19 +880,30 @@ app.post('/request-email-change', authenticateToken, async (req, res) => {
   }
 
   try {
+    // Get user info and verify password
+    const {rows: userRows} = await pool.query(
+      'SELECT name, email, password_hash_string FROM users WHERE id = $1',
+      [req.user]
+    );
+    
+    if (userRows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userRows[0];
+
+    // Verify password
+    const passwordVerified = await verify(user.password_hash_string, password);
+    if (!passwordVerified) {
+      return res.status(401).json({ error: 'Password is incorrect' });
+    }
+
     // Check if new email is already in use
     const {rows: emailCheck} = await pool.query('SELECT id FROM users WHERE email = $1', [newEmail]);
     if (emailCheck.length > 0) {
       return res.status(409).json({ error: 'Email already in use' });
     }
 
-    // Get user info
-    const {rows: userRows} = await pool.query('SELECT name, email FROM users WHERE id = $1', [req.user]);
-    if (userRows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const user = userRows[0];
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
