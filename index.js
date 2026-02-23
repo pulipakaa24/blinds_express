@@ -201,6 +201,26 @@ io.on('connection', async (socket) => {
               io.to(userRows[0].socket).emit("device_connected", {deviceID: id});
             }
           }
+          
+          // Check for pending calibrations (await_calib=true)
+          const {rows: pendingCalibRows} = await pool.query(
+            "SELECT id FROM peripherals WHERE device_id=$1 AND await_calib=TRUE",
+            [id]
+          );
+          
+          if (pendingCalibRows.length > 0 && deviceUserRows.length === 1) {
+            console.log(`Found ${pendingCalibRows.length} pending calibration(s) for device ${id}`);
+            // Notify user app that device is ready - app will trigger calibration
+            const {rows: userRows} = await pool.query(
+              "SELECT socket FROM user_tokens WHERE user_id=$1 AND connected=TRUE",
+              [deviceUserRows[0].user_id]
+            );
+            if (userRows.length === 1 && userRows[0]) {
+              for (const periph of pendingCalibRows) {
+                io.to(userRows[0].socket).emit("calib_device_ready", {periphID: periph.id});
+              }
+            }
+          }
         } catch (err) {
           console.error("Error fetching device state:", err);
           socket.emit("device_init", {
@@ -243,11 +263,25 @@ io.on('connection', async (socket) => {
       
       // Update calibration status in database based on device's actual state
       if (data.port && typeof data.calibrated === 'boolean') {
-        await pool.query(
-          "update peripherals set calibrated=$1 where device_id=$2 and peripheral_number=$3",
+        const result = await pool.query(
+          "update peripherals set calibrated=$1 where device_id=$2 and peripheral_number=$3 returning id, user_id",
           [data.calibrated, rows[0].device_id, data.port]
         );
         console.log(`Updated port ${data.port} calibrated status to ${data.calibrated}`);
+        
+        // Notify user app of calibration status change
+        if (result.rowCount === 1) {
+          const {rows: userRows} = await pool.query(
+            "select socket from user_tokens where user_id=$1 and connected=TRUE",
+            [result.rows[0].user_id]
+          );
+          if (userRows.length === 1 && userRows[0]) {
+            io.to(userRows[0].socket).emit("calib_status_changed", {
+              periphID: result.rows[0].id,
+              calibrated: data.calibrated
+            });
+          }
+        }
       }
     } catch (error) {
       console.error(`Error in report_calib_status:`, error);
@@ -418,6 +452,9 @@ io.on('connection', async (socket) => {
         }
       }
       else console.log("No App connected");
+      
+      // Send acknowledgment back to device
+      socket.emit("calib_done_ack", {port: data.port});
 
     } catch (error) {
       console.error(`Error processing job:`, error);
@@ -451,6 +488,65 @@ io.on('connection', async (socket) => {
     } catch (error) {
       console.error(`Error processing job:`, error);
       throw error;
+    }
+  });
+
+  // User requests calibration
+  socket.on('recalibrate', async (data) => {
+    if (!await rateLimitSocketMessage(socket, 'recalibrate')) return;
+    
+    console.log(`User requesting calibration: ${socket.id}`);
+    console.log(data);
+    try {
+      const {rows: userRows} = await pool.query("select user_id from user_tokens where socket=$1 and connected=TRUE", [socket.id]);
+      if (userRows.length != 1) throw new Error("No user with that socket connected.");
+      
+      const userId = userRows[0].user_id;
+      const periphId = data.periphID;
+      
+      // Get peripheral info and verify ownership
+      const {rows: periphRows} = await pool.query(
+        "SELECT device_id, peripheral_number FROM peripherals WHERE id=$1 AND user_id=$2",
+        [periphId, userId]
+      );
+      
+      if (periphRows.length !== 1) {
+        socket.emit("calib_error", {
+          periphID: periphId,
+          message: "Peripheral not found"
+        });
+        return;
+      }
+      
+      const deviceId = periphRows[0].device_id;
+      const periphNum = periphRows[0].peripheral_number;
+      
+      // Set await_calib=true
+      await pool.query(
+        "UPDATE peripherals SET await_calib=TRUE WHERE id=$1",
+        [periphId]
+      );
+      
+      // Check if device is currently connected
+      const {rows: deviceRows} = await pool.query(
+        "SELECT socket FROM device_tokens WHERE device_id=$1 AND connected=TRUE",
+        [deviceId]
+      );
+      
+      if (deviceRows.length === 1) {
+        // Device is online - notify app to start calibration
+        socket.emit("calib_device_ready", {periphID: periphId});
+        console.log(`Device online, notified app for peripheral ${periphId}`);
+      } else {
+        console.log(`Device offline, waiting for wake for peripheral ${periphId}`);
+        // Device offline - app will receive calib_device_ready when device connects
+      }
+    } catch (error) {
+      console.error(`Error in recalibrate:`, error);
+      socket.emit("calib_error", {
+        periphID: data.periphID,
+        message: "Error requesting calibration"
+      });
     }
   });
 
@@ -1348,22 +1444,74 @@ app.get('/verify_device', authenticateToken, async (req, res) => {
   }
 });
 
-// no longer polling server - using webSocket
-// app.get('/position', authenticateToken, async (req, res) => {
-//   console.log("devicepos");
-//   try {
-//     const {rows} = await pool.query("select last_pos, peripheral_number, await_calib from peripherals where device_id=$1",
-//       [req.peripheral]);
+app.get('/position', authenticateToken, async (req, res) => {
+  console.log("devicepos");
+  try {
+    const {rows} = await pool.query("select last_pos, peripheral_number, await_calib from peripherals where device_id=$1",
+      [req.peripheral]);
 
-//     if (rows.length == 0) {
-//       return res.sendStatus(404);
-//     }
+    if (rows.length == 0) {
+      return res.sendStatus(404);
+    }
 
-//     res.status(200).json(rows);
-//   } catch {
-//     res.status(500).json({error: "server error"});
-//   }
-// });
+    res.status(200).json(rows);
+  } catch {
+    res.status(500).json({error: "server error"});
+  }
+});
+
+app.post('/position', authenticateToken, async (req, res) => {
+  console.log("devicepos");
+  try {
+    const {port, pos} = req.body;
+    const {rows} = await pool.query("update peripherals set last_pos=$1 where device_id=$2 and peripheral_number=$3 returning await_calib",
+      [pos, req.peripheral, port]);
+
+    if (rows.length != 1) {
+      return res.sendStatus(404);
+    }
+
+    res.status(201).json(rows[0]);
+  } catch {
+    res.status(500).json({error: "server error"});
+  }
+});
+
+// Device reports its calibration status after connection
+app.post('/report_calib_status', authenticateToken, async (req, res) => {
+  console.log(`Device reporting calibration status: ${req.peripheral}`);
+  try {
+    const {port, calibrated} = req.body;
+    
+    // Update calibration status in database based on device's actual state
+    if (port && typeof calibrated === 'boolean') {
+      const result = await pool.query(
+        "update peripherals set calibrated=$1 where device_id=$2 and peripheral_number=$3 returning id, user_id",
+        [calibrated, req.peripheral, port]
+      );
+      console.log(`Updated port ${port} calibrated status to ${calibrated}`);
+      
+      // Notify user app of calibration status change
+      if (result.rowCount === 1) {
+        const {rows: userRows} = await pool.query(
+          "select socket from user_tokens where user_id=$1 and connected=TRUE",
+          [result.rows[0].user_id]
+        );
+        if (userRows.length === 1 && userRows[0]) {
+          io.to(userRows[0].socket).emit("calib_status_changed", {
+            periphID: result.rows[0].id,
+            calibrated: calibrated
+          });
+        }
+      }
+      
+      res.sendStatus(201);
+    }
+  } catch (error) {
+    console.error(`Error in report_calib_status:`, error);
+    res.status(500).json({ success: false, message: 'Failed to update status', error: error.message });
+  }
+});
 
 app.post('/manual_position_update', authenticateToken, async (req, res) => {
   console.log("setpos");

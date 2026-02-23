@@ -19,7 +19,7 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
   agenda.define('calib', async (job) => {
     const {periphID, userID } = job.attrs.data;
     try {
-      const result = await sharedPgPool.query("update peripherals set await_calib=TRUE, calibrated=FALSE where id=$1 and user_id=$2 returning device_id, peripheral_number, id",
+      const result = await sharedPgPool.query("update peripherals set await_calib=FALSE, calibrated=FALSE where id=$1 and user_id=$2 returning device_id, peripheral_number, id",
         [periphID, userID]
       );
       if (result.rowCount != 1) throw new Error("No such peripheral in database");
