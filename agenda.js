@@ -263,7 +263,7 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
   agenda.define('deletePasswordResetToken', async (job) => {
     const { email } = job.attrs.data;
     try {
-      const result = await pool.query('DELETE FROM password_reset_tokens WHERE email = $1', [email]);
+      const result = await sharedPgPool.query('DELETE FROM password_reset_tokens WHERE email = $1', [email]);
       if (result.rowCount > 0) {
         console.log(`Deleted expired password reset token for ${email}`);
       }
@@ -284,8 +284,6 @@ const initializeAgenda = async (mongoUri, pool, io) => { // Now accepts pgPool
       console.error(`Error deleting pending email for user ${userId}:`, error);
     }
   });
-  
-  await agenda.start();
 
   agenda.on('ready', () => console.log('Agenda connected to MongoDB and ready!'));
   agenda.on('start', (job) => console.log(`Job "${job.attrs.name}" starting`));

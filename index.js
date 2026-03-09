@@ -1,3 +1,4 @@
+const admin = require('firebase-admin');
 const { verify, hash } = require('argon2');
 const express = require('express');
 const { json } = require('express');
@@ -92,6 +93,21 @@ let agenda;
   // Clear all expired pending email changes on startup
   await pool.query("DELETE FROM user_pending_emails WHERE expires_at < NOW()");
   console.log("Cleared expired pending email changes");
+
+  // Add battery_soc column if this is the first deploy with battery support
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS battery_soc SMALLINT");
+
+  // Add fcm_token column for push notification delivery
+  await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token TEXT");
+
+  // Initialise Firebase Admin SDK for push notifications
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    admin.initializeApp({
+      credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)),
+    });
+  } else {
+    console.warn("FIREBASE_SERVICE_ACCOUNT_JSON not set — push notifications disabled");
+  }
 })();
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '5d';
@@ -1342,12 +1358,10 @@ app.get('/device_name', authenticateToken, async (req, res) => {
   console.log("deviceName");
   try {
     const {deviceId} = req.query;
-    const {rows} = await pool.query('select device_name, max_ports from devices where id=$1 and user_id=$2',
+    const {rows} = await pool.query('select device_name, max_ports, battery_soc from devices where id=$1 and user_id=$2',
       [deviceId, req.user]);
     if (rows.length != 1) return res.sendStatus(404);
-    const deviceName = rows[0].device_name;
-    const maxPorts = rows[0].max_ports;
-    res.status(200).json({device_name: deviceName, max_ports: maxPorts});
+    res.status(200).json({device_name: rows[0].device_name, max_ports: rows[0].max_ports, battery_soc: rows[0].battery_soc});
   } catch {
     res.sendStatus(500);
   }
@@ -2370,6 +2384,82 @@ app.post('/update_group_schedule', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error updating group schedule:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Store/update the FCM token for the authenticated user
+app.post('/register_fcm_token', authenticateToken, async (req, res) => {
+  const { token } = req.body;
+  if (!token || typeof token !== 'string') return res.sendStatus(400);
+  try {
+    await pool.query("UPDATE users SET fcm_token=$1 WHERE id=$2", [token, req.user]);
+    res.sendStatus(204);
+  } catch {
+    res.sendStatus(500);
+  }
+});
+
+// ── Battery endpoints (device-authenticated only) ─────────────────────────────
+
+// Periodic SOC sync — called by wakeTimer every 60 s
+app.post('/battery_update', authenticateToken, async (req, res) => {
+  if (!req.peripheral) return res.sendStatus(403);
+  try {
+    const { soc } = req.body;
+    if (soc == null || soc < 0 || soc > 100) return res.sendStatus(400);
+    await pool.query("UPDATE devices SET battery_soc=$1 WHERE id=$2", [soc, req.peripheral]);
+    res.sendStatus(204);
+  } catch {
+    res.sendStatus(500);
+  }
+});
+
+// Alert events — fires on threshold crossings and critical conditions.
+// Notifies the user via Socket.IO if connected, and via FCM push if the app is in the background.
+app.post('/battery_alert', authenticateToken, async (req, res) => {
+  if (!req.peripheral) return res.sendStatus(403);
+  const validTypes = ['overvoltage', 'critical_low', 'low_voltage_warning', 'low_20', 'low_10'];
+  try {
+    const { type, soc } = req.body;
+    if (!validTypes.includes(type) || soc == null) return res.sendStatus(400);
+
+    await pool.query("UPDATE devices SET battery_soc=$1 WHERE id=$2", [soc, req.peripheral]);
+
+    // Socket.IO — real-time delivery when app is open
+    const {rows} = await pool.query(
+      "SELECT ut.socket FROM user_tokens ut JOIN devices d ON d.user_id = ut.user_id WHERE d.id=$1 AND ut.connected=TRUE",
+      [req.peripheral]
+    );
+    if (rows.length === 1) {
+      io.to(rows[0].socket).emit("battery_alert", { deviceId: req.peripheral, type, soc });
+    }
+
+    // FCM — background push for persistent alerts (not transient voltage dips)
+    const fcmPushTypes = ['overvoltage', 'critical_low', 'low_20', 'low_10'];
+    if (fcmPushTypes.includes(type) && admin.apps.length > 0) {
+      const { rows: fcmRows } = await pool.query(
+        "SELECT u.fcm_token FROM users u JOIN devices d ON d.user_id=u.id WHERE d.id=$1 AND u.fcm_token IS NOT NULL",
+        [req.peripheral]
+      );
+      if (fcmRows.length === 1) {
+        const fcmContent = {
+          overvoltage:  { title: 'Battery Fault',     body: 'Overvoltage detected. Please check your charger.' },
+          critical_low: { title: 'Battery Critical',  body: `Battery at ${soc}% — device is shutting down.` },
+          low_20:       { title: 'Battery Low',        body: `Battery at ${soc}%. Consider charging soon.` },
+          low_10:       { title: 'Battery Very Low',   body: `Battery at ${soc}% — charge now.` },
+        };
+        const { title, body } = fcmContent[type];
+        await admin.messaging().send({
+          token: fcmRows[0].fcm_token,
+          notification: { title, body },
+          data: { type, soc: String(soc), deviceId: String(req.peripheral) },
+        }).catch(err => console.error('FCM send failed:', err.message));
+      }
+    }
+
+    res.sendStatus(204);
+  } catch {
+    res.sendStatus(500);
   }
 });
 
