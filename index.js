@@ -1479,14 +1479,20 @@ app.post('/position', authenticateToken, async (req, res) => {
   console.log("devicepos");
   try {
     const {port, pos} = req.body;
-    const {rows} = await pool.query("update peripherals set last_pos=$1 where device_id=$2 and peripheral_number=$3 returning await_calib",
+    const {rows} = await pool.query("update peripherals set last_pos=$1 where device_id=$2 and peripheral_number=$3 returning await_calib, id, user_id",
       [pos, req.peripheral, port]);
 
     if (rows.length != 1) {
       return res.sendStatus(404);
     }
 
-    res.status(201).json(rows[0]);
+    res.status(201).json({await_calib: rows[0].await_calib});
+
+    // Notify user app of device-reported position
+    const {rows: userRows} = await pool.query("select socket from user_tokens where user_id=$1 and connected=TRUE", [rows[0].user_id]);
+    if (userRows.length === 1 && userRows[0]) {
+      io.to(userRows[0].socket).emit("device_pos_report", {periphID: rows[0].id, pos});
+    }
   } catch {
     res.status(500).json({error: "server error"});
   }
