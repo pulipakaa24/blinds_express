@@ -279,10 +279,13 @@ io.on('connection', async (socket) => {
       
       // Update calibration status in database based on device's actual state
       if (data.port && typeof data.calibrated === 'boolean') {
-        const result = await pool.query(
-          "update peripherals set calibrated=$1 where device_id=$2 and peripheral_number=$3 returning id, user_id",
-          [data.calibrated, rows[0].device_id, data.port]
-        );
+        // When the device declares itself uncalibrated, also clear await_calib so
+        // any stale pending-calibration state is gone. The device is already connected
+        // via socket, so the next calib_start from the agenda job will land correctly.
+        const updateQuery = data.calibrated
+          ? "update peripherals set calibrated=TRUE where device_id=$1 and peripheral_number=$2 returning id, user_id"
+          : "update peripherals set calibrated=FALSE, await_calib=FALSE where device_id=$1 and peripheral_number=$2 returning id, user_id";
+        const result = await pool.query(updateQuery, [rows[0].device_id, data.port]);
         console.log(`Updated port ${data.port} calibrated status to ${data.calibrated}`);
         
         // Notify user app of calibration status change
