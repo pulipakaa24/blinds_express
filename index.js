@@ -1394,6 +1394,7 @@ app.post('/add_device', authenticateToken, async (req, res) => {
       [req.user, deviceName, ports]
     ); // finish token return based on device ID.
     const deviceInitToken = await createTempPeriphToken(rows[0].id);
+    console.log("complete");
     res.status(201).json({token: deviceInitToken});
   } catch (err) {
     console.log(err);
