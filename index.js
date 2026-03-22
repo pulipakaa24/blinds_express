@@ -100,6 +100,11 @@ let agenda;
   // Add fcm_token column for push notification delivery
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token TEXT");
 
+  // Add timezone support
+  await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'America/Chicago'");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS timezone TEXT");
+  await pool.query("ALTER TABLE groups ADD COLUMN IF NOT EXISTS timezone TEXT");
+
   // Initialise Firebase Admin SDK for push notifications
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     admin.initializeApp({
@@ -895,7 +900,7 @@ app.post('/logout', authenticateToken, async (req, res) => {
 app.get('/account_info', authenticateToken, async (req, res) => {
   try {
     const {rows} = await pool.query(
-      'SELECT name, email, created_at FROM users WHERE id = $1',
+      'SELECT name, email, created_at, COALESCE(timezone, \'America/Chicago\') AS timezone FROM users WHERE id = $1',
       [req.user]
     );
     if (rows.length === 0) {
@@ -904,7 +909,8 @@ app.get('/account_info', authenticateToken, async (req, res) => {
     res.status(200).json({
       name: rows[0].name,
       email: rows[0].email,
-      created_at: rows[0].created_at
+      created_at: rows[0].created_at,
+      timezone: rows[0].timezone
     });
   } catch (err) {
     console.error(err);
@@ -1361,10 +1367,10 @@ app.get('/device_name', authenticateToken, async (req, res) => {
   console.log("deviceName");
   try {
     const {deviceId} = req.query;
-    const {rows} = await pool.query('select device_name, max_ports, battery_soc from devices where id=$1 and user_id=$2',
+    const {rows} = await pool.query('select device_name, max_ports, battery_soc, timezone from devices where id=$1 and user_id=$2',
       [deviceId, req.user]);
     if (rows.length != 1) return res.sendStatus(404);
-    res.status(200).json({device_name: rows[0].device_name, max_ports: rows[0].max_ports, battery_soc: rows[0].battery_soc});
+    res.status(200).json({device_name: rows[0].device_name, max_ports: rows[0].max_ports, battery_soc: rows[0].battery_soc, timezone: rows[0].timezone});
   } catch {
     res.sendStatus(500);
   }
@@ -1390,11 +1396,11 @@ app.post('/add_device', authenticateToken, async (req, res) => {
     console.log("add device request");
     console.log(req.user);
     console.log(req.peripheral);
-    const {deviceName, maxPorts} = req.body;
+    const {deviceName, maxPorts, timezone} = req.body;
     console.log(deviceName);
     const ports = maxPorts || 4; // Default to 4 for multi-port devices
-    const {rows} = await pool.query("insert into devices (user_id, device_name, max_ports) values ($1, $2, $3) returning id",
-      [req.user, deviceName, ports]
+    const {rows} = await pool.query("insert into devices (user_id, device_name, max_ports, timezone) values ($1, $2, $3, $4) returning id",
+      [req.user, deviceName, ports, timezone || null]
     ); // finish token return based on device ID.
     const deviceInitToken = await createTempPeriphToken(rows[0].id);
     console.log("complete");
@@ -1825,6 +1831,28 @@ function createCronExpression(time, daysOfWeek) {
   return `${time.minute} ${time.hour} * * ${cronDays}`;
 }
 
+// Look up the effective timezone for a device's schedules (device → user fallback)
+async function getScheduleTimezone(deviceId, userId) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(d.timezone, u.timezone, 'America/Chicago') AS tz
+     FROM devices d JOIN users u ON d.user_id = u.id
+     WHERE d.id = $1 AND d.user_id = $2`,
+    [deviceId, userId]
+  );
+  return rows.length > 0 ? rows[0].tz : 'America/Chicago';
+}
+
+// Look up the effective timezone for a group's schedules (group → user fallback)
+async function getGroupScheduleTimezone(groupId, userId) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(g.timezone, u.timezone, 'America/Chicago') AS tz
+     FROM groups g JOIN users u ON g.user_id = u.id
+     WHERE g.id = $1 AND g.user_id = $2`,
+    [groupId, userId]
+  );
+  return rows.length > 0 ? rows[0].tz : 'America/Chicago';
+}
+
 // Helper function to find and verify a schedule job belongs to the user
 async function findUserScheduleJob(jobId, userId) {
   const jobs = await agenda.jobs({
@@ -1872,16 +1900,18 @@ app.post('/add_schedule', authenticateToken, async (req, res) => {
     const changedPosList = [{periphNum: periphNum, periphID: periphId, pos: newPos}];
     
     // Schedule the recurring job
+    const tz = await getScheduleTimezone(deviceId, req.user);
     const job = await agenda.create('posChangeScheduled', {
       deviceID: deviceId,
       changedPosList: changedPosList,
       userID: req.user
     });
-    
+
     job.repeatEvery(cronExpression, {
+      timezone: tz,
       skipImmediate: true
     });
-    
+
     await job.save();
 
     res.status(201).json({
@@ -1959,13 +1989,15 @@ app.post('/update_schedule', authenticateToken, async (req, res) => {
     
     console.log("Creating new job with cron:", cronExpression);
     // Create new job with updated schedule
+    const tz = await getScheduleTimezone(deviceId, req.user);
     const job = await agenda.create('posChangeScheduled', {
       deviceID: deviceId,
       changedPosList: changedPosList,
       userID: req.user
     });
-    
+
     job.repeatEvery(cronExpression, {
+      timezone: tz,
       skipImmediate: true
     });
     
@@ -2068,7 +2100,7 @@ app.get('/group_list', authenticateToken, async (req, res) => {
 app.post('/add_group', authenticateToken, async (req, res) => {
   console.log("add_group request for user:", req.user);
   try {
-    const { name, peripheral_ids } = req.body;
+    const { name, peripheral_ids, timezone } = req.body;
 
     // Validate input
     if (!name || !name.trim()) {
@@ -2114,11 +2146,11 @@ app.post('/add_group', authenticateToken, async (req, res) => {
 
     // Insert into groups table
     const insertGroupQuery = `
-      INSERT INTO groups (user_id, name) 
-      VALUES ($1, $2) 
+      INSERT INTO groups (user_id, name, timezone)
+      VALUES ($1, $2, $3)
       RETURNING id
     `;
-    const { rows: groupRows } = await pool.query(insertGroupQuery, [req.user, name.trim()]);
+    const { rows: groupRows } = await pool.query(insertGroupQuery, [req.user, name.trim(), timezone || null]);
     const groupId = groupRows[0].id;
 
     // Insert into group_peripherals table
@@ -2301,6 +2333,7 @@ app.post('/add_group_schedule', authenticateToken, async (req, res) => {
     }
 
     // Create the job
+    const tz = await getGroupScheduleTimezone(groupId, req.user);
     const job = await agenda.create('groupPosChangeScheduled', {
       groupID: groupId,
       newPos,
@@ -2308,7 +2341,7 @@ app.post('/add_group_schedule', authenticateToken, async (req, res) => {
     });
 
     job.repeatEvery(cronExpression, {
-      timezone: 'America/New_York',
+      timezone: tz,
       skipImmediate: true
     });
 
@@ -2379,9 +2412,10 @@ app.post('/update_group_schedule', authenticateToken, async (req, res) => {
     }
 
     // Update job
+    const tz = await getGroupScheduleTimezone(groupId, req.user);
     job.attrs.data.newPos = newPos;
     job.repeatEvery(cronExpression, {
-      timezone: 'America/New_York',
+      timezone: tz,
       skipImmediate: true
     });
 
@@ -2498,7 +2532,9 @@ app.post('/group_schedule_list', authenticateToken, async (req, res) => {
     });
 
     const scheduledUpdates = jobs.map(job => {
-      const interval = cronParser.parseExpression(job.attrs.repeatInterval);
+      const interval = cronParser.parseExpression(job.attrs.repeatInterval, {
+        tz: job.attrs.repeatTimezone || undefined
+      });
       const schedule = {
         minutes: interval.fields.minute,
         hours: interval.fields.hour,
@@ -2515,6 +2551,114 @@ app.post('/group_schedule_list', authenticateToken, async (req, res) => {
     res.status(200).json({ scheduledUpdates });
   } catch (error) {
     console.error('Error fetching group schedules:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/user_timezone', authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT COALESCE(timezone, 'America/Chicago') AS timezone FROM users WHERE id=$1",
+      [req.user]
+    );
+    res.status(200).json({ timezone: rows[0]?.timezone ?? 'America/Chicago' });
+  } catch (error) {
+    console.error('Error fetching user timezone:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/update_user_timezone', authenticateToken, async (req, res) => {
+  try {
+    const { timezone } = req.body;
+    if (!timezone || typeof timezone !== 'string') {
+      return res.status(400).json({ error: 'timezone is required' });
+    }
+    // Validate it's a recognisable IANA name by running it through cron-parser
+    try {
+      cronParser.parseExpression('0 0 * * 0', { tz: timezone });
+    } catch {
+      return res.status(400).json({ error: 'Invalid IANA timezone' });
+    }
+    await pool.query("UPDATE users SET timezone=$1 WHERE id=$2", [timezone, req.user]);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Error updating user timezone:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/update_device_timezone', authenticateToken, async (req, res) => {
+  try {
+    const { deviceId, timezone } = req.body;
+    if (!deviceId || !timezone) return res.status(400).json({ error: 'Missing required fields' });
+    try {
+      cronParser.parseExpression('0 0 * * 0', { tz: timezone });
+    } catch {
+      return res.status(400).json({ error: 'Invalid IANA timezone' });
+    }
+    const result = await pool.query(
+      'UPDATE devices SET timezone=$1 WHERE id=$2 AND user_id=$3',
+      [timezone, deviceId, req.user]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Device not found' });
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Error updating device timezone:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/group_timezone', authenticateToken, async (req, res) => {
+  try {
+    const { groupId } = req.query;
+    if (!groupId) return res.status(400).json({ error: 'groupId is required' });
+    const { rows } = await pool.query(
+      'SELECT timezone FROM groups WHERE id=$1 AND user_id=$2',
+      [groupId, req.user]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    res.status(200).json({ timezone: rows[0].timezone });
+  } catch (error) {
+    console.error('Error fetching group timezone:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/update_group_timezone', authenticateToken, async (req, res) => {
+  try {
+    const { groupId, timezone } = req.body;
+    if (!groupId || !timezone) return res.status(400).json({ error: 'Missing required fields' });
+    try {
+      cronParser.parseExpression('0 0 * * 0', { tz: timezone });
+    } catch {
+      return res.status(400).json({ error: 'Invalid IANA timezone' });
+    }
+    const result = await pool.query(
+      'UPDATE groups SET timezone=$1 WHERE id=$2 AND user_id=$3',
+      [timezone, groupId, req.user]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Group not found' });
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Error updating group timezone:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/rename_group', authenticateToken, async (req, res) => {
+  try {
+    const { groupId, newName } = req.body;
+    if (!groupId || !newName || !newName.trim()) return res.status(400).json({ error: 'Missing required fields' });
+    const result = await pool.query(
+      'UPDATE groups SET name=$1 WHERE id=$2 AND user_id=$3',
+      [newName.trim(), groupId, req.user]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Group not found' });
+    res.status(200).json({ success: true });
+  } catch (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'A group with this name already exists' });
+    console.error('Error renaming group:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
