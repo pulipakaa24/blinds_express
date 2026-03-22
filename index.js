@@ -52,8 +52,10 @@ const wsMessageRateLimiter = new RateLimiterMemory({
   duration: 1,
 });
 
+const path = require('path');
 const app = express();
 const port = 3000;
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(json());
 
 // Rate limiting middleware for HTTP requests
@@ -646,9 +648,6 @@ async function authenticateToken(req, res, next) {
   }
 }
 
-app.get('/', (req, res) => {
-  res.send('Hello World!');
-});
 
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;

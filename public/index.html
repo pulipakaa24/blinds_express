@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlindMaster — Smart Blinds, Effortlessly Controlled</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <div class="nav-logo">
+        <div class="nav-logo-icon">
+          <div class="slat"></div>
+          <div class="slat"></div>
+          <div class="slat"></div>
+          <div class="slat"></div>
+        </div>
+        <span>BlindMaster</span>
+      </div>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#how-it-works">How It Works</a></li>
+        <li><a href="#tech">Open Hardware</a></li>
+        <li><a href="#coming-soon" class="nav-cta">Get Early Access</a></li>
+        <li><a href="/app" class="nav-launch">Launch App</a></li>
+      </ul>
+      <button class="nav-hamburger" id="hamburger" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- MOBILE NAV -->
+  <div class="mobile-nav" id="mobileNav">
+    <ul>
+      <li><a href="#features" class="mobile-nav-link">Features</a></li>
+      <li><a href="#how-it-works" class="mobile-nav-link">How It Works</a></li>
+      <li><a href="#tech" class="mobile-nav-link">Open Hardware</a></li>
+      <li><a href="#coming-soon" class="mobile-nav-link">Get Early Access</a></li>
+      <li><a href="/app" class="mobile-nav-link mobile-nav-launch">Launch App</a></li>
+    </ul>
+  </div>
+
+  <!-- HERO -->
+  <section class="hero" id="hero">
+    <div class="hero-bg-grid"></div>
+    <div class="hero-content">
+      <div class="hero-badge">
+        <span class="badge-dot"></span>
+        Smart Home IoT
+      </div>
+      <h1 class="hero-title">
+        Your blinds,<br />
+        <span class="hero-accent">on your schedule.</span>
+      </h1>
+      <p class="hero-subtitle">
+        BlindMaster brings real-time remote control, intelligent scheduling, and
+        seamless IoT integration to your motorized window blinds — from anywhere.
+      </p>
+      <div class="hero-actions">
+        <a href="/app" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+          Launch App
+        </a>
+        <a href="#how-it-works" class="btn btn-ghost">See How It Works</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-num">11</span>
+          <span class="stat-label">Positions</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-num">∞</span>
+          <span class="stat-label">Schedules</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-num">Real-time</span>
+          <span class="stat-label">Socket.IO Sync</span>
+        </div>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="window-frame">
+        <div class="window-header">
+          <div class="window-dot red"></div>
+          <div class="window-dot yellow"></div>
+          <div class="window-dot green"></div>
+          <span class="window-title">BlindMaster</span>
+        </div>
+        <div class="blind-container" id="heroBlind">
+          <div class="blind-slat" style="--i:0"></div>
+          <div class="blind-slat" style="--i:1"></div>
+          <div class="blind-slat" style="--i:2"></div>
+          <div class="blind-slat" style="--i:3"></div>
+          <div class="blind-slat" style="--i:4"></div>
+          <div class="blind-slat" style="--i:5"></div>
+          <div class="blind-slat" style="--i:6"></div>
+          <div class="blind-slat" style="--i:7"></div>
+          <div class="blind-slat" style="--i:8"></div>
+          <div class="blind-slat" style="--i:9"></div>
+        </div>
+        <div class="app-ui-overlay">
+          <div class="app-slider-label">Position</div>
+          <div class="app-slider-track">
+            <div class="app-slider-thumb" id="sliderThumb"></div>
+          </div>
+          <div class="app-slider-vals">
+            <span>Close ↓</span>
+            <span>Open</span>
+            <span>Close ↑</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <div class="section-inner">
+      <div class="section-header reveal">
+        <p class="section-eyebrow">Why BlindMaster</p>
+        <h2 class="section-title">Everything you need to control your light.</h2>
+      </div>
+      <div class="features-grid">
+
+        <div class="feature-card reveal" style="--delay:0ms">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 18.5A6.5 6.5 0 1 0 12 5.5a6.5 6.5 0 0 0 0 13Z"/>
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+            </svg>
+          </div>
+          <h3>Real-Time Control</h3>
+          <p>Adjust any blind instantly via WebSocket — sub-second response from your phone to your window, anywhere in the world.</p>
+        </div>
+
+        <div class="feature-card reveal" style="--delay:80ms">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3" y="4" width="18" height="18" rx="2"/>
+              <path d="M16 2v4M8 2v4M3 10h18"/>
+              <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/>
+            </svg>
+          </div>
+          <h3>Smart Scheduling</h3>
+          <p>Set automated cron-based schedules per blind or per group. Wake up to light gradually filling the room — automatically.</p>
+        </div>
+
+        <div class="feature-card reveal" style="--delay:160ms">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <h3>Groups &amp; Rooms</h3>
+          <p>Group multiple blinds and control them together. One tap to raise every blind in a room simultaneously.</p>
+        </div>
+
+        <div class="feature-card reveal" style="--delay:240ms">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
+          <h3>Secure by Default</h3>
+          <p>JWT authentication, Argon2 password hashing, TLS everywhere, and multi-layer rate limiting — your home stays yours.</p>
+        </div>
+
+        <div class="feature-card reveal" style="--delay:320ms">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M23 6l-9.5 9.5-5-5L1 18"/>
+              <path d="M17 6h6v6"/>
+            </svg>
+          </div>
+          <h3>Auto-Calibration</h3>
+          <p>A guided multi-stage calibration flow maps encoder ticks to your exact blind travel — precise positioning every time.</p>
+        </div>
+
+        <div class="feature-card reveal" style="--delay:400ms">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="2" y="7" width="20" height="14" rx="2"/>
+              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+              <line x1="12" y1="12" x2="12" y2="16"/>
+              <line x1="10" y1="14" x2="14" y2="14"/>
+            </svg>
+          </div>
+          <h3>Battery-Aware</h3>
+          <p>Built-in MAX17048 fuel gauge monitoring with low-battery alerts. Dynamic CPU scaling and servo power gating extend runtime.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how-it-works" id="how-it-works">
+    <div class="section-inner">
+      <div class="section-header reveal">
+        <p class="section-eyebrow">Architecture</p>
+        <h2 class="section-title">Three components. One seamless system.</h2>
+        <p class="section-sub">BlindMaster is a full-stack IoT platform — every layer is purpose-built to work together.</p>
+      </div>
+      <div class="arch-flow reveal">
+        <div class="arch-node">
+          <div class="arch-icon app-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="5" y="2" width="14" height="20" rx="2"/>
+              <path d="M12 18h.01"/>
+            </svg>
+          </div>
+          <h4>Flutter App</h4>
+          <p>iOS &amp; Android mobile app. Time-based theming. Real-time slider control. Schedule management.</p>
+          <div class="arch-tag">blinds_flutter</div>
+        </div>
+        <div class="arch-arrow">
+          <div class="arch-arrow-line"></div>
+          <div class="arch-arrow-label">Socket.IO + JWT + TLS</div>
+          <div class="arch-arrow-line"></div>
+        </div>
+        <div class="arch-node arch-node-center">
+          <div class="arch-icon server-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="2" y="2" width="20" height="8" rx="2"/>
+              <rect x="2" y="14" width="20" height="8" rx="2"/>
+              <line x1="6" y1="6" x2="6.01" y2="6"/>
+              <line x1="6" y1="18" x2="6.01" y2="18"/>
+            </svg>
+          </div>
+          <h4>Express Server</h4>
+          <p>Central relay &amp; API. PostgreSQL + MongoDB. Agenda scheduling. Email via AWS SES.</p>
+          <div class="arch-tag">blinds_express</div>
+        </div>
+        <div class="arch-arrow">
+          <div class="arch-arrow-line"></div>
+          <div class="arch-arrow-label">Socket.IO + JWT + TLS</div>
+          <div class="arch-arrow-line"></div>
+        </div>
+        <div class="arch-node">
+          <div class="arch-icon device-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+            </svg>
+          </div>
+          <h4>ESP32-C6</h4>
+          <p>FreeRTOS firmware. BLE provisioning. Servo + encoder control. NVS persistent state.</p>
+          <div class="arch-tag">Blinds_XIAO</div>
+        </div>
+      </div>
+      <div class="arch-ble-note reveal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16">
+          <path d="M7 7l10 10M17 7l-5 5 5 5M7 7l5 5-5 5"/>
+        </svg>
+        BLE provisioning (setup only) — phone pairs directly to device to deliver Wi-Fi credentials &amp; auth token
+      </div>
+      <div class="steps-grid reveal">
+        <div class="step">
+          <div class="step-num">01</div>
+          <h4>Provision Once</h4>
+          <p>Pair your ESP32-C6 device over BLE from the app. Enter your Wi-Fi credentials and authenticate — stored securely on the device in NVS.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">02</div>
+          <h4>Calibrate</h4>
+          <p>A guided handshake walks the device through measuring your blind's full travel range. Precise 11-position control from that point on.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">03</div>
+          <h4>Control &amp; Schedule</h4>
+          <p>Use the app slider for immediate control or set recurring schedules. Changes reach your blinds in real-time over Socket.IO.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- OPEN HARDWARE -->
+  <section class="tech" id="tech">
+    <div class="section-inner">
+      <div class="tech-content reveal">
+        <div class="tech-text">
+          <p class="section-eyebrow">Open Hardware</p>
+          <h2 class="section-title">Built on the Seeed XIAO ESP32-C6.</h2>
+          <p>BlindMaster hardware is built around the Seeed XIAO ESP32-C6 — a compact, powerful RISC-V module with built-in Wi-Fi 6 and Bluetooth 5.3. The firmware is open-source ESP-IDF, and hardware schematics will be open-sourced at launch.</p>
+          <ul class="tech-list">
+            <li>
+              <span class="tech-check">✓</span>
+              LEDC PWM servo control at 50Hz with encoder-based position feedback
+            </li>
+            <li>
+              <span class="tech-check">✓</span>
+              MAX17048 I²C fuel gauge for accurate LiPo state-of-charge monitoring
+            </li>
+            <li>
+              <span class="tech-check">✓</span>
+              Dynamic CPU scaling (80–160MHz) + light sleep for extended battery life
+            </li>
+            <li>
+              <span class="tech-check">✓</span>
+              NimBLE secure provisioning — no cloud dependency during setup
+            </li>
+          </ul>
+        </div>
+        <div class="tech-visual">
+          <div class="chip-card">
+            <div class="chip-glow"></div>
+            <div class="chip-body">
+              <div class="chip-label">ESP32-C6</div>
+              <div class="chip-sub">RISC-V · Wi-Fi 6 · BT 5.3</div>
+              <div class="chip-pins">
+                <div class="chip-pin-row left">
+                  <div class="chip-pin"></div>
+                  <div class="chip-pin"></div>
+                  <div class="chip-pin"></div>
+                  <div class="chip-pin"></div>
+                  <div class="chip-pin"></div>
+                </div>
+                <div class="chip-core">
+                  <div class="chip-core-inner"></div>
+                </div>
+                <div class="chip-pin-row right">
+                  <div class="chip-pin"></div>
+                  <div class="chip-pin"></div>
+                  <div class="chip-pin"></div>
+                  <div class="chip-pin"></div>
+                  <div class="chip-pin"></div>
+                </div>
+              </div>
+              <div class="chip-tags">
+                <span>FreeRTOS</span>
+                <span>ESP-IDF</span>
+                <span>NimBLE</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMING SOON -->
+  <section class="coming-soon" id="coming-soon">
+    <div class="section-inner">
+      <div class="coming-soon-card reveal">
+        <div class="cs-badge">
+          <span class="cs-badge-dot"></span>
+          Coming Soon
+        </div>
+        <h2>Ready to take control of your light?</h2>
+        <p>
+          BlindMaster is launching on <strong>TestFlight</strong> for iOS beta testers,
+          with hardware schematics open-sourced at the same time. Join the early access
+          list to be first to know.
+        </p>
+        <div class="cs-highlights">
+          <div class="cs-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.45 2 2 0 0 1 3.59 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.96a16 16 0 0 0 6.29 6.29l.62-.91a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            iOS TestFlight Beta
+          </div>
+          <div class="cs-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            Open-Source Hardware
+          </div>
+          <div class="cs-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+            Android App (following)
+          </div>
+        </div>
+        <form class="cs-form" id="earlyAccessForm">
+          <input
+            type="email"
+            placeholder="your@email.com"
+            class="cs-input"
+            id="emailInput"
+            required
+          />
+          <button type="submit" class="btn btn-primary cs-btn">Notify Me</button>
+        </form>
+        <p class="cs-disclaimer">No spam. Just a launch notification.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-logo">
+        <div class="nav-logo-icon small">
+          <div class="slat"></div>
+          <div class="slat"></div>
+          <div class="slat"></div>
+          <div class="slat"></div>
+        </div>
+        <span>BlindMaster</span>
+      </div>
+      <p class="footer-tagline">Smart blinds. Effortless control.</p>
+      <div class="footer-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#tech">Hardware</a>
+        <a href="#coming-soon">Early Access</a>
+      </div>
+      <p class="footer-copy">&copy; 2026 BlindMaster. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
